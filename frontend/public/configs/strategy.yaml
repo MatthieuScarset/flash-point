@@ -8,23 +8,23 @@ block_library:
     label: 'stable_hex'
     shape: 'polygon'
     sides: 6
-    radius: 35
+    radius: 18
     friction: 0.9
     restitution: 0.1
     render: { fillStyle: '#4A90E2' } # Blue
   volatile_hex:
     label: 'volatile_hex'
     shape: 'polygon'
-    sides: 4
-    radius: 35
+    sides: 6
+    radius: 18
     friction: 0.1
     restitution: 0.7
     render: { fillStyle: '#E94E77' } # Red
   heavy_square:
     label: 'heavy_square'
     shape: 'rectangle'
-    width: 40
-    height: 40
+    width: 32
+    height: 32
     mass: 10 # Heavier than default
     friction: 0.7
     restitution: 0.05
@@ -36,13 +36,13 @@ block_library:
 # -----------------------------------------------------------------------------
 start_conditions:
   default_start:
-    - block_id: 'stable_hex'
+    - block_id: 'volatile_hex'
       position: { x: '50%', y: '60%' } # Use percentages (relative to scene width/height)
     - block_id: 'heavy_square'
       position: { x: '50%', y: '70%' }
     - block_id: 'stable_hex'
       position: { x: '50%', y: '80%' }
-    - block_id: 'volatile_hex'
+    - block_id: 'heavy_square'
       position: { x: '50%', y: '100%' }
 
 # -----------------------------------------------------------------------------

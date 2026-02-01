@@ -59,16 +59,18 @@ function App() {
     const world = engine.world
 
     const container = sceneRef.current
-    const ASPECT = 16 / 9
+    // Portrait aspect (taller than wide)
+    const ASPECT = 9 / 16
+
     const getSize = () => {
-      const maxWidth = Math.min(1100, Math.round(window.innerWidth * 0.9))
-      const width = container.clientWidth || maxWidth || 800
+      const maxWidth = Math.min(360, Math.round(window.innerWidth * 0.6))
+      const width = container.clientWidth || maxWidth || 320
       let height = container.clientHeight || 0
 
       // If height isn't available (sometimes until CSS resolves), derive it from width and aspect
       if (!height || height === 0) {
         height = Math.round(width / ASPECT)
-        const maxH = Math.round(window.innerHeight * 0.7)
+        const maxH = Math.round(window.innerHeight * 0.9)
         height = Math.min(height, maxH)
       }
 
@@ -83,21 +85,35 @@ function App() {
         width: size.width,
         height: size.height,
         wireframes: false,
-        background: '#f0f0f0'
+        background: 'transparent'
       }
     })
 
-    // helper to set physical canvas size for high-DPI screens
+    // helper to set physical canvas size so physics coords match the visible scene
     const setRenderSize = (width, height) => {
       const ratio = window.devicePixelRatio || 1
+      // internal canvas uses device pixel ratio so 1 physics unit === 1 css px
+      const pixelWidth = Math.max(200, Math.round(width * ratio))
+      const pixelHeight = Math.max(400, Math.round(height * ratio))
+
       render.options.width = width
       render.options.height = height
       render.bounds.max.x = width
       render.bounds.max.y = height
-      render.canvas.width = Math.round(width * ratio)
-      render.canvas.height = Math.round(height * ratio)
+
+      // set the internal canvas bitmap size to match device pixels
+      render.canvas.width = pixelWidth
+      render.canvas.height = pixelHeight
+
+      // reset transform and scale context so drawing maps 1:1 to CSS pixels
+      if (render.context && render.context.setTransform) {
+        render.context.setTransform(ratio, 0, 0, ratio, 0, 0)
+      }
+
+      // Make the canvas fill the scene container (CSS controls final width/height)
       render.canvas.style.width = `${width}px`
       render.canvas.style.height = `${height}px`
+      render.canvas.style.display = 'block'
     }
 
     setRenderSize(size.width, size.height)
@@ -107,7 +123,11 @@ function App() {
     Runner.run(runner, engine)
 
     // Add ground and walls (kept as variables so we can rebuild on resize)
-    let ground = Bodies.rectangle(size.width / 2, size.height + 30, size.width, 60, { isStatic: true })
+    const groundHeight = Math.max(20, Math.round(size.height * 0.06))
+    const groundY = size.height - Math.round(groundHeight / 2)
+
+    // place the ground so its top edge sits slightly above the bottom of the visible scene
+    let ground = Bodies.rectangle(size.width / 2, groundY, size.width, groundHeight, { isStatic: true, render: { fillStyle: '#2b2f35', strokeStyle: '#6ea0d6', lineWidth: 2 } })
     let topWall = Bodies.rectangle(size.width / 2, -10, size.width * 2, 20, { isStatic: true, render: { visible: false } })
     let leftWall = Bodies.rectangle(-10, size.height / 2, 20, size.height * 2, { isStatic: true, render: { visible: false } })
     let rightWall = Bodies.rectangle(size.width + 10, size.height / 2, 20, size.height * 2, { isStatic: true, render: { visible: false } })
@@ -115,7 +135,9 @@ function App() {
 
     // Add mouse control (attach to the canvas and support devicePixelRatio)
     const mouse = Matter.Mouse.create(render.canvas)
-    mouse.pixelRatio = window.devicePixelRatio || 1
+    // pixel ratio between the internal canvas pixels and logical scene pixels
+    const ratio = window.devicePixelRatio || 1
+    mouse.pixelRatio = ratio
     const mouseConstraint = Matter.MouseConstraint.create(engine, {
       mouse: mouse,
       constraint: { stiffness: 0.2, render: { visible: false } }
@@ -142,15 +164,16 @@ function App() {
 
       // rebuild bounds/walls
       Composite.remove(world, [ground, topWall, leftWall, rightWall])
-      ground = Bodies.rectangle(width / 2, height + 30, width, 60, { isStatic: true })
+      ground = Bodies.rectangle(width / 2, height - 30, width, 60, { isStatic: true, render: { fillStyle: '#222', strokeStyle: '#555', lineWidth: 4 } })
       topWall = Bodies.rectangle(width / 2, -10, width * 2, 20, { isStatic: true, render: { visible: false } })
       leftWall = Bodies.rectangle(-10, height / 2, 20, height * 2, { isStatic: true, render: { visible: false } })
       rightWall = Bodies.rectangle(width + 10, height / 2, 20, height * 2, { isStatic: true, render: { visible: false } })
       Composite.add(world, [ground, topWall, leftWall, rightWall])
 
-      // Update mouse to point to new canvas element
+      // Update mouse to point to new canvas element and recompute pixel ratio
+      const ratio = window.devicePixelRatio || 1
       mouse.element = render.canvas
-      mouse.pixelRatio = window.devicePixelRatio || 1
+      mouse.pixelRatio = ratio
     }
 
     window.addEventListener('resize', handleResize)
@@ -171,7 +194,16 @@ function App() {
           }
           return Number(v)
         }
-        return { x: resolve(pos.x, width), y: resolve(pos.y, height) }
+        const rawX = resolve(pos.x, width)
+        const rawY = resolve(pos.y, height)
+        const padding = 12
+        const clamp = (val, min, max) => Math.min(max, Math.max(min, val))
+
+        // ensure y is placed above the ground
+        const groundH = Math.max(20, Math.round(height * 0.06))
+        const x = clamp(rawX, padding, width - padding)
+        const y = clamp(rawY, padding, height - groundH - padding)
+        return { x, y }
       }
 
       startCondition.forEach(startBlock => {
@@ -211,9 +243,11 @@ function App() {
         const rect = container.getBoundingClientRect()
         const width = rect.width || container.clientWidth || 800
         const height = rect.height || container.clientHeight || 600
+        const groundH = Math.max(20, Math.round(height * 0.06))
         const padding = 40 // keep some spacing from edges
         const x = Math.random() * Math.max(0, width - padding * 2) + padding
-        const y = Math.max(30, Math.round(height * 0.08))
+        const yTop = Math.max(30, Math.round(height * 0.08))
+        const y = Math.min(yTop, height - groundH - padding)
 
         const position = { x, y }
         const block = createBlock(blockConfig, position)
@@ -239,7 +273,7 @@ function App() {
         <article ref={sceneRef} className='scene'></article>
       </main>
       <footer className='app-footer'>
-        I am a footer
+        <a href="https://github.com/MatthieuScarset/flash-point#">🙈 Github</a>
       </footer>
     </div>
   )
