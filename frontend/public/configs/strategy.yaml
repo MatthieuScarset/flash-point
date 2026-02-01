@@ -1,0 +1,47 @@
+# /frontend/src/configs/strategy.yaml
+
+# 1. World Configuration: Governs the overall physics and arena layout.
+world:
+  physics:
+    gravity:
+      x: 0
+      y: 1.0   # Vertical gravity. We can make it stronger or weaker here.
+  platform:
+    width: 600 # Width of the player's building platform.
+    height: 20 # Thickness of the platform.
+
+# 2. Block Configuration: Defines the properties of the hexagons.
+blocks:
+  # Properties for "Stable" blocks, spawned from BUY orders.
+  stable:
+    label: 'stable_block'
+    friction: 0.9      # High friction, easier to stack.
+    restitution: 0.1   # Low bounciness.
+    render:
+      fillStyle: '#4A90E2' # A calming blue color.
+
+  # Properties for "Volatile" blocks, spawned from SELL orders.
+  volatile:
+    label: 'volatile_block'
+    friction: 0.1      # Low friction, slippery and hard to stack.
+    restitution: 0.7   # High bounciness.
+    render:
+      fillStyle: '#E94E77' # A vibrant pink/red color.
+
+  # Controls how the trade `quantity` from the oracle maps to block size.
+  sizing:
+    min_radius: 20 # Smallest possible hexagon radius.
+    max_radius: 45 # Largest possible hexagon radius.
+
+# 3. Game Rules: Defines the core gameplay loop.
+game:
+  win_condition: 'max_height_at_timer' # The player with the highest tower at the end wins.
+  session_duration: 180 # Match length in seconds.
+  spawner:
+    base_rate: 1.5 # How many seconds between each new block spawn, on average.
+    surge_multiplier: 2.0 # How much faster blocks spawn during a liquidity surge.
+
+# 4. Oracle Configuration: Defines where the market data comes from.
+oracle:
+  market_id: 'ETH-USD'  # The market pair to watch for trades.
+  provider: 'YellowNetwork' # The L3 oracle provider.

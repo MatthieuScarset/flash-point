@@ -1,12 +1,24 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Matter from 'matter-js'
+import yaml from 'js-yaml'
 import './style.css'
 
 function App() {
   const sceneRef = useRef(null)
   const engineRef = useRef(null)
+  const [config, setConfig] = useState(null)
 
   useEffect(() => {
+    fetch('/configs/strategy.yaml')
+      .then((response) => response.text())
+      .then((text) => {
+        setConfig(yaml.load(text))
+      })
+  }, [])
+
+  useEffect(() => {
+    if (!config) return
+
     // Matter.js setup
     const Engine = Matter.Engine
     const Render = Matter.Render
@@ -17,6 +29,8 @@ function App() {
     const engine = Engine.create()
     engineRef.current = engine
     const world = engine.world
+    engine.gravity.x = config.world.physics.gravity.x
+    engine.gravity.y = config.world.physics.gravity.y
 
     const render = Render.create({
       element: sceneRef.current,
@@ -33,8 +47,14 @@ function App() {
     const runner = Runner.create()
     Runner.run(runner, engine)
 
-    // Add ground
-    const ground = Bodies.rectangle(400, 600, 810, 60, { isStatic: true })
+    // Add ground from config
+    const ground = Bodies.rectangle(
+      400, // x
+      600, // y
+      config.world.platform.width,
+      config.world.platform.height,
+      { isStatic: true }
+    )
     Composite.add(world, ground)
 
     // Add mouse control
@@ -59,21 +79,38 @@ function App() {
       render.canvas.remove()
       render.textures = {}
     }
-  }, [])
+  }, [config])
 
   const spawnHexagon = () => {
-    if (engineRef.current) {
+    if (engineRef.current && config) {
       const Bodies = Matter.Bodies
       const Composite = Matter.Composite
-      const hexagon = Bodies.polygon(Math.random() * 700 + 50, 50, 6, 30)
+      
+      const blockType = Math.random() < 0.5 ? 'stable' : 'volatile'
+      const blockConfig = config.blocks[blockType]
+      const radius = config.blocks.sizing.min_radius + Math.random() * (config.blocks.sizing.max_radius - config.blocks.sizing.min_radius)
+
+      const hexagon = Bodies.polygon(
+        Math.random() * 700 + 50, // x
+        50, // y
+        6, // sides
+        radius,
+        {
+          friction: blockConfig.friction,
+          restitution: blockConfig.restitution,
+          render: blockConfig.render
+        }
+      )
       Composite.add(engineRef.current.world, hexagon)
     }
   }
 
   return (
     <div>
-      <h1>FlashPoint - Phase 1: The Physics Foundation</h1>
-      <button onClick={spawnHexagon}>Spawn Hexagon</button>
+      <h1>FlashPoint - Phase 1 Bis: Configurable Physics</h1>
+      <button onClick={spawnHexagon} disabled={!config}>
+        {config ? 'Spawn Hexagon' : 'Loading Config...'}
+      </button>
       <div ref={sceneRef} style={{ width: '800px', height: '600px' }}></div>
     </div>
   )

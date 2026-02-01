@@ -100,6 +100,15 @@ This will start the Vite dev server for the UI (port 5173 by default).
   * Create a `spawnHexagon()` function that generates 2D regular polygons.
   * Implement "MouseConstraint" to allow dragging/dropping for testing.
 
+### Phase 1 bis: The Configurable gameplay
+
+* **Goal:** Allow users to defined missions/modes of a game
+
+* **Logic:**
+  * Use a YAML-defined set of rules and attributes which is selected and parsed on game load. 
+  * 
+
+
 ### Phase 2: Live Market Mapping
 
 * **Goal:** Turn trade data into block properties.
