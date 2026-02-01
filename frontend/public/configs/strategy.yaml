@@ -1,47 +1,94 @@
-# /frontend/src/configs/strategy.yaml
+# strategy.yaml
 
-# 1. World Configuration: Governs the overall physics and arena layout.
-world:
-  physics:
-    gravity:
-      x: 0
-      y: 1.0   # Vertical gravity. We can make it stronger or weaker here.
-  platform:
-    width: 600 # Width of the player's building platform.
-    height: 20 # Thickness of the platform.
+# -----------------------------------------------------------------------------
+# A central library of all possible block types. Game modes will pick from here.
+# -----------------------------------------------------------------------------
+block_library:
+  stable_hex:
+    label: 'stable_hex'
+    shape: 'polygon'
+    sides: 6
+    radius: 35
+    friction: 0.9
+    restitution: 0.1
+    render: { fillStyle: '#4A90E2' } # Blue
+  volatile_hex:
+    label: 'volatile_hex'
+    shape: 'polygon'
+    sides: 6
+    radius: 35
+    friction: 0.1
+    restitution: 0.7
+    render: { fillStyle: '#E94E77' } # Red
+  heavy_square:
+    label: 'heavy_square'
+    shape: 'rectangle'
+    width: 40
+    height: 40
+    mass: 10 # Heavier than default
+    friction: 0.7
+    restitution: 0.05
+    render: { fillStyle: '#6D28D9' } # Purple
 
-# 2. Block Configuration: Defines the properties of the hexagons.
-blocks:
-  # Properties for "Stable" blocks, spawned from BUY orders.
-  stable:
-    label: 'stable_block'
-    friction: 0.9      # High friction, easier to stack.
-    restitution: 0.1   # Low bounciness.
-    render:
-      fillStyle: '#4A90E2' # A calming blue color.
+# -----------------------------------------------------------------------------
+# Defines the initial state of the player's platform for a given game mode.
+# If a game mode doesn't have a start condition, it will be empty.
+# -----------------------------------------------------------------------------
+start_conditions:
+  default_start:
+    - block_id: 'stable_hex'
+      position: { x: 350, y: 550 } # Pre-placed on the platform
+    - block_id: 'stable_hex'
+      position: { x: 450, y: 550 }
 
-  # Properties for "Volatile" blocks, spawned from SELL orders.
-  volatile:
-    label: 'volatile_block'
-    friction: 0.1      # Low friction, slippery and hard to stack.
-    restitution: 0.7   # High bounciness.
-    render:
-      fillStyle: '#E94E77' # A vibrant pink/red color.
+# -----------------------------------------------------------------------------
+# A list of all playable game modes.
+# -----------------------------------------------------------------------------
+game_modes:
+  - id: 'stacker_challenge'
+    name: 'Stacker Challenge'
+    description: 'Build the tallest tower before time runs out!'
+    start_condition: 'default_start'
+    rules:
+      session_duration: 20
+      win_condition:
+        type: 'max_height'
+    spawner:
+      base_rate: 1.5
+      allowed_blocks: ['stable_hex', 'volatile_hex']
 
-  # Controls how the trade `quantity` from the oracle maps to block size.
-  sizing:
-    min_radius: 20 # Smallest possible hexagon radius.
-    max_radius: 45 # Largest possible hexagon radius.
+  - id: 'stability_test'
+    name: 'Stability Test'
+    description: 'Build a solid tower to survive a votality earthquake.'
+    start_condition: null
+    rules:
+      - phase: 'build'
+        duration: 120
+      - phase: 'test'
+        duration: 3
+        # We can add phase-specific physics changes here in the future
+        # physics_multiplier: { gravity: 1.5 }
+    win_condition:
+      type: 'stability' # Measures time without any blocks falling during the 'test' phase.
+    spawner:
+      base_rate: 1.0
+      allowed_blocks: ['stable_hex', 'volatile_hex', 'heavy_square']
 
-# 3. Game Rules: Defines the core gameplay loop.
-game:
-  win_condition: 'max_height_at_timer' # The player with the highest tower at the end wins.
-  session_duration: 180 # Match length in seconds.
-  spawner:
-    base_rate: 1.5 # How many seconds between each new block spawn, on average.
-    surge_multiplier: 2.0 # How much faster blocks spawn during a liquidity surge.
+  - id: 'uniformity_check'
+    name: 'Uniformity Check'
+    description: 'Build a balanced tower to maximize your score.'
+    start_condition: null
+    rules:
+      session_duration: 240
+    win_condition:
+      type: 'uniformity'
+      # We want a 1:1 ratio of stable to volatile blocks
+      target_balance: { stable_hex: 1, volatile_hex: 1 }
+    spawner:
+      base_rate: 2.0
+      allowed_blocks: ['stable_hex', 'volatile_hex']
 
-# 4. Oracle Configuration: Defines where the market data comes from.
-oracle:
-  market_id: 'ETH-USD'  # The market pair to watch for trades.
-  provider: 'YellowNetwork' # The L3 oracle provider.
+# -----------------------------------------------------------------------------
+# The game mode to load when the app starts.
+# -----------------------------------------------------------------------------
+active_game_mode: 'stacker_challenge'
