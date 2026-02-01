@@ -6,9 +6,12 @@ import './style.css'
 const Bodies = Matter.Bodies
 const Composite = Matter.Composite
 
-// Helper function to create a block from the library
+const BLOCK_DEFAULT_RADIUS = 18
+const BLOCK_DEFAULT_WIDTH = 32
+const BLOCK_DEFAULT_HEIGHT = 32
+
 const createBlock = (blockConfig, position) => {
-  const { shape, x, y } = position
+  const { x, y } = position
   const commonProperties = {
     friction: blockConfig.friction,
     restitution: blockConfig.restitution,
@@ -16,11 +19,15 @@ const createBlock = (blockConfig, position) => {
   }
 
   if (blockConfig.shape === 'rectangle') {
-    return Bodies.rectangle(x, y, blockConfig.width, blockConfig.height, commonProperties)
+    const w = blockConfig.width || DEFAULT_WIDTH
+    const h = blockConfig.height || DEFAULT_HEIGHT
+    return Bodies.rectangle(x, y, w, h, commonProperties)
   }
   
-  // Default to polygon
-  return Bodies.polygon(x, y, blockConfig.sides, blockConfig.radius, commonProperties)
+  // polygon (use sides and radius with fallback)
+  const sides = blockConfig.sides || 6
+  const radius = blockConfig.radius || DEFAULT_RADIUS
+  return Bodies.polygon(x, y, sides, radius, commonProperties)
 }
 
 
