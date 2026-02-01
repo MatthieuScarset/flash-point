@@ -47,7 +47,7 @@ function App() {
     const runner = Runner.create()
     Runner.run(runner, engine)
 
-    // Add ground from config
+    // Add ground and walls
     const ground = Bodies.rectangle(
       400, // x
       600, // y
@@ -55,7 +55,9 @@ function App() {
       config.world.platform.height,
       { isStatic: true }
     )
-    Composite.add(world, ground)
+    const leftWall = Bodies.rectangle(0, 300, 20, 1200, { isStatic: true, render: { visible: false } });
+    const rightWall = Bodies.rectangle(800, 300, 20, 1200, { isStatic: true, render: { visible: false } });
+    Composite.add(world, [ground, leftWall, rightWall])
 
     // Add mouse control
     const mouse = Matter.Mouse.create(render.canvas)
