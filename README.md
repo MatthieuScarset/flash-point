@@ -79,9 +79,43 @@ Loser Rewards: Even the losing player receives a portion of their stake back and
 1. Configure your Strategy: Edit `src/configs/rules.yaml` to adjust block physics and reward ratios.
 1. Run the local dev server: `npm run start`
 
+Frontend (React): Change directory into `frontend/`, then run:
+
+```
+cd frontend
+npm install
+npm run dev
+```
+
+This will start the Vite dev server for the UI (port 5173 by default).
+
 ## 🛣️ Roadmap
 
-* [ ] Phase 1: MVP with random hex spawning and basic physics synchronization.
-* [ ] Phase 2: Integration of Yellow Network SDK for live price-to-physics mapping.
-* [ ] Phase 3: State Channel implementation for real-time betting and instant rewards.
-* [ ] Phase 4: Tournament mode and custom YAML strategy marketplace.
+### Phase 1: The Physics Foundation
+
+* **Goal:** Single-player local MVP.
+
+* **Tasks:**
+  * Initialize Matter.js world with a static ground (The Platform).
+  * Create a `spawnHexagon()` function that generates 2D regular polygons.
+  * Implement "MouseConstraint" to allow dragging/dropping for testing.
+
+### Phase 2: Live Market Mapping
+
+* **Goal:** Turn trade data into block properties.
+
+* **Logic:**
+  * `side: buy` ➔ Stable Block (High friction 0.9, low bounce).
+  * `side: sell` ➔ Volatile Block (Low friction 0.1, high bounce).
+  * `quantity` ➔ Mass/Scale (Larger trades = bigger, heavier blocks).
+
+### Phase 3: 1v1 Multi-player
+* **Goal:** Sync two players in a single arena.
+* **Tasks:**
+  * Server-side "Master Clock" to ensure both players get identical block sequences.
+  * Sync block "settle" positions (x, y, rotation) via Socket.io to render the opponent's tower.
+
+### Phase 4: Yellow Network Integration
+* **Staking:** Use Nitrolite SDK to open a state channel for the pot.
+* **End Game:** Calculate final height ratio ($H_1 / (H_1 + H_2)$).
+* **Settlement:** Call `settle()` to distribute tokens proportionally to players' wallets.
