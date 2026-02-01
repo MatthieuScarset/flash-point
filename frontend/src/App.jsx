@@ -157,13 +157,28 @@ function App() {
     // run once to ensure everything is positioned correctly
     setTimeout(handleResize, 0)
     
-    // 3. Implement Start Conditions
+    // 3. Implement Start Conditions (positions can be percentages relative to scene size)
     if (activeMode.start_condition && gameConfig.start_conditions[activeMode.start_condition]) {
       const startCondition = gameConfig.start_conditions[activeMode.start_condition];
+
+      const resolvePosition = (pos) => {
+        // pos.x or pos.y may be a number or a percentage string like '35%'
+        const { width, height } = getSize()
+        const resolve = (v, axisSize) => {
+          if (typeof v === 'string' && v.trim().endsWith('%')) {
+            const pct = parseFloat(v) / 100
+            return Math.round(pct * axisSize)
+          }
+          return Number(v)
+        }
+        return { x: resolve(pos.x, width), y: resolve(pos.y, height) }
+      }
+
       startCondition.forEach(startBlock => {
         const blockConfig = gameConfig.block_library[startBlock.block_id];
-        if (blockConfig) {
-          const block = createBlock(blockConfig, startBlock.position);
+        if (blockConfig && startBlock.position) {
+          const position = resolvePosition(startBlock.position)
+          const block = createBlock(blockConfig, position);
           Composite.add(world, block);
         }
       });
@@ -185,13 +200,22 @@ function App() {
 
   // 4. Update spawner logic
   const spawnBlock = () => {
-    if (engineRef.current && activeMode) {
+    if (engineRef.current && activeMode && sceneRef.current) {
       // Pick a random block from the allowed list
       const blockId = activeMode.spawner.allowed_blocks[Math.floor(Math.random() * activeMode.spawner.allowed_blocks.length)];
       const blockConfig = gameConfig.block_library[blockId];
-      
+
       if (blockConfig) {
-        const position = { x: Math.random() * 700 + 50, y: 50 }
+        // compute spawn position based on scene size so blocks always spawn inside the visible canvas
+        const container = sceneRef.current
+        const rect = container.getBoundingClientRect()
+        const width = rect.width || container.clientWidth || 800
+        const height = rect.height || container.clientHeight || 600
+        const padding = 40 // keep some spacing from edges
+        const x = Math.random() * Math.max(0, width - padding * 2) + padding
+        const y = Math.max(30, Math.round(height * 0.08))
+
+        const position = { x, y }
         const block = createBlock(blockConfig, position)
         Composite.add(engineRef.current.world, block)
       }

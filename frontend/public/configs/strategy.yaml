@@ -15,7 +15,7 @@ block_library:
   volatile_hex:
     label: 'volatile_hex'
     shape: 'polygon'
-    sides: 6
+    sides: 4
     radius: 35
     friction: 0.1
     restitution: 0.7
@@ -37,9 +37,13 @@ block_library:
 start_conditions:
   default_start:
     - block_id: 'stable_hex'
-      position: { x: 350, y: 550 } # Pre-placed on the platform
+      position: { x: '50%', y: '60%' } # Use percentages (relative to scene width/height)
+    - block_id: 'heavy_square'
+      position: { x: '50%', y: '70%' }
     - block_id: 'stable_hex'
-      position: { x: 450, y: 550 }
+      position: { x: '50%', y: '80%' }
+    - block_id: 'volatile_hex'
+      position: { x: '50%', y: '100%' }
 
 # -----------------------------------------------------------------------------
 # A list of all playable game modes.
