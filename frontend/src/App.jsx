@@ -18,24 +18,34 @@ const createBlock = (blockConfig, position) => {
     render: blockConfig.render
   }
 
+  let body
   if (blockConfig.shape === 'rectangle') {
-    const w = blockConfig.width || DEFAULT_WIDTH
-    const h = blockConfig.height || DEFAULT_HEIGHT
-    return Bodies.rectangle(x, y, w, h, commonProperties)
+    const w = blockConfig.width || BLOCK_DEFAULT_WIDTH
+    const h = blockConfig.height || BLOCK_DEFAULT_HEIGHT
+    body = Bodies.rectangle(x, y, w, h, commonProperties)
+  } else {
+    // polygon (use sides and radius with fallback)
+    const sides = blockConfig.sides || 6
+    const radius = blockConfig.radius || BLOCK_DEFAULT_RADIUS
+    body = Bodies.polygon(x, y, sides, radius, commonProperties)
   }
-  
-  // polygon (use sides and radius with fallback)
-  const sides = blockConfig.sides || 6
-  const radius = blockConfig.radius || DEFAULT_RADIUS
-  return Bodies.polygon(x, y, sides, radius, commonProperties)
+
+  // Tag the body with a block id/label (used for level checks)
+  body.label = blockConfig.label || blockConfig.shape
+  return body
 }
 
 
 function App() {
   const sceneRef = useRef(null)
   const engineRef = useRef(null)
+  const levelTimerRef = useRef(null)
   const [gameConfig, setGameConfig] = useState(null)
   const [activeMode, setActiveMode] = useState(null)
+  const [levels, setLevels] = useState([])
+  const [activeLevelId, setActiveLevelId] = useState(null)
+  const [activeLevel, setActiveLevel] = useState(null)
+  const [levelState, setLevelState] = useState({ started: false, remainingTime: null, status: 'idle' })
   const [draggedBody, setDraggedBody] = useState(null)
 
   // 1. Load the full strategy config
@@ -49,6 +59,27 @@ function App() {
         // Find and set the active game mode
         const mode = fullConfig.game_modes.find(m => m.id === fullConfig.active_game_mode)
         setActiveMode(mode)
+      })
+  }, [])
+
+  // Load levels config (optional)
+  useEffect(() => {
+    fetch('/configs/levels.yaml')
+      .then((res) => res.text())
+      .then((text) => {
+        try {
+          const parsed = yaml.load(text)
+          const loaded = parsed && parsed.levels ? parsed.levels : []
+          setLevels(loaded)
+          if (loaded && loaded[0]) {
+            setActiveLevelId(loaded[0].id)
+            setActiveLevel(loaded[0])
+          }
+        } catch (e) {
+          console.warn('Failed to parse levels.yaml', e)
+        }
+      }).catch(() => {
+        // no levels file — that's fine
       })
   }, [])
 
@@ -234,14 +265,23 @@ function App() {
       Engine.clear(engine)
       render.canvas.remove()
       render.textures = {}
+
+      if (levelTimerRef.current) {
+        clearInterval(levelTimerRef.current)
+        levelTimerRef.current = null
+      }
     }
   }, [activeMode, gameConfig])
 
   // 4. Update spawner logic
   const spawnBlock = () => {
     if (engineRef.current && activeMode && sceneRef.current) {
-      // Pick a random block from the allowed list
-      const blockId = activeMode.spawner.allowed_blocks[Math.floor(Math.random() * activeMode.spawner.allowed_blocks.length)];
+      // Pick allowed blocks from the active level when running, otherwise fall back to mode spawner
+      const allowed = (activeLevel && levelState.started && activeLevel.allowed_blocks && activeLevel.allowed_blocks.length)
+        ? activeLevel.allowed_blocks
+        : activeMode.spawner.allowed_blocks
+
+      const blockId = allowed[Math.floor(Math.random() * allowed.length)]
       const blockConfig = gameConfig.block_library[blockId];
 
       if (blockConfig) {
@@ -263,6 +303,120 @@ function App() {
     }
   }
 
+  // Helpers for level management
+  const clearNonStaticBodies = () => {
+    if (!engineRef.current) return
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    bodies.forEach(b => {
+      if (!b.isStatic) {
+        Composite.remove(world, b)
+      }
+    })
+  }
+
+  const addStartBlocksForLevel = (level) => {
+    if (!engineRef.current || !level) return
+    const world = engineRef.current.world
+
+    // Support both `start_blocks` and `start_condition` (ref into gameConfig.start_conditions)
+    let blocks = null
+    if (level.start_blocks && Array.isArray(level.start_blocks)) {
+      blocks = level.start_blocks
+      if (level.start_condition) console.warn('Both `start_blocks` and `start_condition` present on level; using `start_blocks`.')
+    } else if (level.start_condition && gameConfig && gameConfig.start_conditions && gameConfig.start_conditions[level.start_condition]) {
+      blocks = gameConfig.start_conditions[level.start_condition]
+      console.warn('`start_condition` on level is deprecated; prefer `start_blocks`. Using referenced start condition from strategy.yaml.')
+    }
+
+    if (!blocks) return
+
+    blocks.forEach(sb => {
+      const blockConfig = gameConfig.block_library[sb.block_id]
+      if (blockConfig) {
+        // resolve percentage positions same as other code
+        const container = sceneRef.current
+        const { width, height } = container ? { width: container.clientWidth, height: container.clientHeight } : { width: 320, height: 640 }
+        const resolve = (v, axisSize) => {
+          if (typeof v === 'string' && v.trim().endsWith('%')) {
+            const pct = parseFloat(v) / 100
+            return Math.round(pct * axisSize)
+          }
+          return Number(v)
+        }
+        const pos = { x: resolve(sb.position.x, width), y: resolve(sb.position.y, height) }
+        const body = createBlock(blockConfig, pos)
+        Composite.add(world, body)
+      }
+    })
+  }
+
+  const countBlocksOfType = (blockId) => {
+    if (!engineRef.current) return 0
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    return bodies.reduce((acc, b) => acc + (b.label === blockId ? 1 : 0), 0)
+  }
+
+  const checkLevelWin = () => {
+    if (!activeLevel || !engineRef.current || !activeLevel.target) return
+    const t = activeLevel.target
+    if (t.type === 'count_blocks') {
+      const count = countBlocksOfType(t.block_id)
+      if (count >= t.count) {
+        // win
+        setLevelState(prev => ({ ...prev, status: 'completed', started: false }))
+        if (levelTimerRef.current) {
+          clearInterval(levelTimerRef.current)
+          levelTimerRef.current = null
+        }
+      }
+    }
+    // TODO: more target types (height, etc.)
+  }
+
+  const startLevel = (levelId) => {
+    const lvl = levels.find(l => l.id === levelId)
+    if (!lvl) return
+    setActiveLevel(lvl)
+    // Clear world and add start blocks
+    clearNonStaticBodies()
+    addStartBlocksForLevel(lvl)
+
+    setLevelState({ started: true, remainingTime: lvl.time_limit || null, status: 'running' })
+
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current)
+      levelTimerRef.current = null
+    }
+
+    levelTimerRef.current = setInterval(() => {
+      setLevelState(prev => {
+        const rem = (prev.remainingTime || 0) - 1
+        if (rem <= 0) {
+          // fail
+          clearInterval(levelTimerRef.current)
+          levelTimerRef.current = null
+          return { ...prev, remainingTime: 0, status: 'failed', started: false }
+        }
+        return { ...prev, remainingTime: rem }
+      })
+      // check win after each tick
+      checkLevelWin()
+    }, 1000)
+  }
+
+  const resetLevel = () => {
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current)
+      levelTimerRef.current = null
+    }
+    setLevelState({ started: false, remainingTime: null, status: 'idle' })
+    clearNonStaticBodies()
+    // re-add start blocks for the selected level (if any)
+    if (activeLevel) addStartBlocksForLevel(activeLevel)
+  }
+
   return (
     <div className='app'>
       <header className='app-header'>
@@ -270,7 +424,34 @@ function App() {
           <>
             <h1>{activeMode.name}</h1>
             <p>{activeMode.description}</p>
-            <button onClick={spawnBlock}>Spawn Block</button>
+
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
+              <label>
+                Level:
+                <select value={activeLevelId || ''} onChange={(e) => {
+                  const id = e.target.value
+                  setActiveLevelId(id)
+                  const lvl = levels.find(l => l.id === id)
+                  setActiveLevel(lvl)
+                  // show start blocks preview
+                  resetLevel()
+                }}>
+                  {levels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </label>
+
+              <button onClick={() => startLevel(activeLevelId)} disabled={!activeLevel || levelState.started}>Start Level</button>
+              <button onClick={resetLevel} disabled={!activeLevel}>Reset Level</button>
+
+              <button onClick={spawnBlock}>Spawn Block</button>
+            </div>
+
+            <div style={{ marginTop: 6, fontSize: 12, color: '#9fb0cc' }}>
+              {activeLevel && <span>Level: {activeLevel.name} — {activeLevel.description} </span>}
+              {levelState.status === 'running' && <span> • Time left: {levelState.remainingTime}s</span>}
+              {levelState.status === 'completed' && <span> • Completed ✅</span>}
+              {levelState.status === 'failed' && <span> • Failed ⛔</span>}
+            </div>
           </>
         ) : (
           <h1>Loading Game...</h1>
@@ -280,7 +461,7 @@ function App() {
         <article ref={sceneRef} className='scene'></article>
       </main>
       <footer className='app-footer'>
-        <a href="https://github.com/MatthieuScarset/flash-point#">🙈 Github</a>
+        <a href="https://github.com/MatthieuScarset/flash-point">🙈 Github</a>
       </footer>
     </div>
   )

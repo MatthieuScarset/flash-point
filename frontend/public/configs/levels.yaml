@@ -1,0 +1,27 @@
+# levels.yaml
+
+levels:
+  - id: 'level_1'
+    name: 'Volatile Tower I'
+    description: 'Build a tower of 6 volatile blocks.'
+    allowed_blocks: ['volatile_hex']
+    target:
+      type: 'count_blocks'
+      block_id: 'volatile_hex'
+      count: 10
+    time_limit: 60
+    start_blocks: [
+    ]
+    physics: {}
+
+  - id: 'practice_balanced'
+    name: 'Balanced Practice'
+    description: 'Practice building with stable hexes.'
+    allowed_blocks: ['stable_hex']
+    target:
+      type: 'count_blocks'
+      block_id: 'stable_hex'
+      count: 6
+    time_limit: 45
+    start_blocks: []
+    physics: {}
