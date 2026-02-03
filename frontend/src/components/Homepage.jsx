@@ -1,8 +1,14 @@
 import React from 'react'
+import ConnectWalletButton from './ConnectWalletButton'
 
 function Homepage({ gameModes, onStartGame }) {
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-12 bg-gradient-to-b from-[#0b0f14] to-[#131a24]">
+      {/* Header with Wallet */}
+      <div className="w-full max-w-4xl flex justify-end mb-4">
+        <ConnectWalletButton />
+      </div>
+
       {/* Hero Section */}
       <div className="text-center mb-12">
         <h1 className="text-5xl md:text-6xl font-bold mb-4 gradient-title">
