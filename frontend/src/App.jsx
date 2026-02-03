@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Matter from 'matter-js'
 import yaml from 'js-yaml'
+import Homepage from './components/Homepage'
 import './style.css'
 
 const Bodies = Matter.Bodies
@@ -47,6 +48,7 @@ function App() {
   const [activeLevel, setActiveLevel] = useState(null)
   const [levelState, setLevelState] = useState({ started: false, remainingTime: null, status: 'idle' })
   const [draggedBody, setDraggedBody] = useState(null)
+  const [currentView, setCurrentView] = useState('homepage') // 'homepage' or 'game'
 
   // 1. Load the full strategy config
   useEffect(() => {
@@ -83,9 +85,28 @@ function App() {
       })
   }, [])
 
+  // Handle starting a game from homepage
+  const handleStartGame = (modeId) => {
+    const mode = gameConfig.game_modes.find(m => m.id === modeId)
+    if (mode) {
+      setActiveMode(mode)
+      setCurrentView('game')
+    }
+  }
+
+  // Go back to homepage
+  const handleBackToHome = () => {
+    setCurrentView('homepage')
+    setLevelState({ started: false, remainingTime: null, status: 'idle' })
+    if (levelTimerRef.current) {
+      clearInterval(levelTimerRef.current)
+      levelTimerRef.current = null
+    }
+  }
+
   // 2. Setup Matter.js world based on the active mode
   useEffect(() => {
-    if (!activeMode || !gameConfig) return
+    if (!activeMode || !gameConfig || currentView !== 'game') return
 
     // Matter.js setup
     const Engine = Matter.Engine
@@ -271,7 +292,7 @@ function App() {
         levelTimerRef.current = null
       }
     }
-  }, [activeMode, gameConfig])
+  }, [activeMode, gameConfig, currentView])
 
   // 4. Update spawner logic
   const spawnBlock = () => {
@@ -417,51 +438,60 @@ function App() {
     if (activeLevel) addStartBlocksForLevel(activeLevel)
   }
 
+  // Show homepage if not in game
+  if (currentView === 'homepage') {
+    return (
+      <Homepage 
+        gameModes={gameConfig?.game_modes || []} 
+        onStartGame={handleStartGame} 
+      />
+    )
+  }
+
   return (
-    <div className='app'>
-      <header className='app-header'>
+    <div className='flex flex-col items-center bg-transparent py-12'>
+      <header className='relative text-center mb-4'>
         {activeMode ? (
           <>
-            <h1>{activeMode.name}</h1>
-            <p>{activeMode.description}</p>
+            <button 
+              className='px-4 py-2 mb-8 text-sm text-[#9fb0cc] bg-white/5 border border-white/10 rounded-md cursor-pointer transition-all duration-150 hover:bg-white/10 hover:text-[#e6eef8]' 
+              onClick={handleBackToHome}
+            >
+              ← Back to Menu
+            </button>
+            <h1 className='text-2xl font-bold text-[#e6eef8] mb-2'>{activeMode.name}</h1>
+            <p className='text-sm text-[#9fb0cc] mb-4'>{activeMode.description}</p>
 
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center' }}>
-              <label>
-                Level:
-                <select value={activeLevelId || ''} onChange={(e) => {
-                  const id = e.target.value
-                  setActiveLevelId(id)
-                  const lvl = levels.find(l => l.id === id)
-                  setActiveLevel(lvl)
-                  // show start blocks preview
-                  resetLevel()
-                }}>
-                  {levels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
-              </label>
-
-              <button onClick={() => startLevel(activeLevelId)} disabled={!activeLevel || levelState.started}>Start Level</button>
-              <button onClick={resetLevel} disabled={!activeLevel}>Reset Level</button>
-
-              <button onClick={spawnBlock}>Spawn Block</button>
+            <div className='flex gap-2 items-center justify-center flex-wrap'>
+              <button 
+                className='px-4 py-2 text-sm font-medium text-[#e6eef8] bg-[#6D28D9]/80 rounded-md cursor-pointer transition-all duration-150 hover:bg-[#6D28D9]'
+                onClick={spawnBlock}
+              >
+                Spawn Block
+              </button>
             </div>
 
-            <div style={{ marginTop: 6, fontSize: 12, color: '#9fb0cc' }}>
+            <div className='mt-2 text-xs text-[#9fb0cc]'>
               {activeLevel && <span>Level: {activeLevel.name} — {activeLevel.description} </span>}
               {levelState.status === 'running' && <span> • Time left: {levelState.remainingTime}s</span>}
-              {levelState.status === 'completed' && <span> • Completed ✅</span>}
-              {levelState.status === 'failed' && <span> • Failed ⛔</span>}
+              {levelState.status === 'completed' && <span className='text-green-400'> • Completed ✅</span>}
+              {levelState.status === 'failed' && <span className='text-red-400'> • Failed ⛔</span>}
             </div>
           </>
         ) : (
-          <h1>Loading Game...</h1>
+          <h1 className='text-2xl font-bold text-[#e6eef8]'>Loading Game...</h1>
         )}
       </header>
-      <main className='app-content'>
+      <main className='w-full flex justify-center'>
         <article ref={sceneRef} className='scene'></article>
       </main>
-      <footer className='app-footer'>
-        <a href="https://github.com/MatthieuScarset/flash-point">🙈 Github</a>
+      <footer className='mt-4'>
+        <a 
+          href="https://github.com/MatthieuScarset/flash-point"
+          className='text-[#6ea0d6] text-sm no-underline hover:underline'
+        >
+          🙈 Github
+        </a>
       </footer>
     </div>
   )
