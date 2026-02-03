@@ -8,10 +8,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@erc7824/nitrolite": "^0.5.3",
+    "@tanstack/react-query": "^5.90.20",
     "js-yaml": "^4.1.1",
     "matter-js": "^0.20.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.8.3",
+    "viem": "^2.45.1",
+    "wagmi": "^3.4.2"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.24",

@@ -2,7 +2,7 @@ import React from 'react'
 import { useAccount } from 'wagmi'
 import ConnectWalletButton from './ConnectWalletButton'
 
-function Homepage({ gameModes, onStartGame }) {
+function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
   const { isConnected } = useAccount()
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-12 bg-gradient-to-b from-[#0b0f14] to-[#131a24]">
@@ -51,22 +51,22 @@ function Homepage({ gameModes, onStartGame }) {
                 )}
               </div>
               <button 
-                className="w-full py-3 px-6 my-4 text-base font-semibold text-white rounded-lg cursor-pointer transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 gradient-button"
+                className="w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg cursor-pointer transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 bg-[#2a3040] hover:bg-[#353d50] border border-white/10"
                 onClick={() => onStartGame(mode.id)}
               >
-                Train alone
+                🎯 Train Alone
               </button>
               <button 
-                className={`w-full py-3 px-6 text-base font-semibold text-white rounded-lg transition-all duration-150 ${
+                className={`w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg transition-all duration-150 ${
                   isConnected 
-                    ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0 gradient-button' 
+                    ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400' 
                     : 'bg-gray-600 cursor-not-allowed opacity-50'
                 }`}
-                onClick={() => isConnected && onStartGame(mode.id)}
+                onClick={() => isConnected && onStartMultiplayer(mode.id, mode.name)}
                 disabled={!isConnected}
-                title={!isConnected ? 'Connect wallet to start a game' : ''}
+                title={!isConnected ? 'Connect wallet to start a game' : 'Bet 1 USDC to play against others'}
               >
-                {isConnected ? 'Start game' : 'Connect to play'}
+                {isConnected ? '💰 Play for 1 USDC' : '🔒 Connect to play'}
               </button>
             </div>
           ))}

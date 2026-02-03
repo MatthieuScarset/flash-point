@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import Matter from 'matter-js'
 import yaml from 'js-yaml'
 import Homepage from './components/Homepage'
+import GameLobby from './components/GameLobby'
 import './style.css'
 
 const Bodies = Matter.Bodies
@@ -48,7 +49,9 @@ function App() {
   const [activeLevel, setActiveLevel] = useState(null)
   const [levelState, setLevelState] = useState({ started: false, remainingTime: null, status: 'idle' })
   const [draggedBody, setDraggedBody] = useState(null)
-  const [currentView, setCurrentView] = useState('homepage') // 'homepage' or 'game'
+  const [currentView, setCurrentView] = useState('homepage') // 'homepage', 'lobby', or 'game'
+  const [lobbyData, setLobbyData] = useState(null) // { modeId, modeName }
+  const [multiplayerGame, setMultiplayerGame] = useState(null) // game data from matchmaking
 
   // 1. Load the full strategy config
   useEffect(() => {
@@ -85,18 +88,44 @@ function App() {
       })
   }, [])
 
-  // Handle starting a game from homepage
+  // Handle starting a solo game from homepage
   const handleStartGame = (modeId) => {
     const mode = gameConfig.game_modes.find(m => m.id === modeId)
     if (mode) {
       setActiveMode(mode)
+      setMultiplayerGame(null)
       setCurrentView('game')
     }
+  }
+
+  // Handle starting multiplayer game (opens lobby)
+  const handleStartMultiplayer = (modeId, modeName) => {
+    setLobbyData({ modeId, modeName })
+    setCurrentView('lobby')
+  }
+
+  // Handle when multiplayer match is found and game starts
+  const handleMultiplayerGameStart = (gameData) => {
+    const mode = gameConfig.game_modes.find(m => m.id === gameData.modeId)
+    if (mode) {
+      setActiveMode(mode)
+      setMultiplayerGame(gameData)
+      setLobbyData(null)
+      setCurrentView('game')
+    }
+  }
+
+  // Handle canceling lobby
+  const handleCancelLobby = () => {
+    setLobbyData(null)
+    setCurrentView('homepage')
   }
 
   // Go back to homepage
   const handleBackToHome = () => {
     setCurrentView('homepage')
+    setMultiplayerGame(null)
+    setLobbyData(null)
     setLevelState({ started: false, remainingTime: null, status: 'idle' })
     if (levelTimerRef.current) {
       clearInterval(levelTimerRef.current)
@@ -443,7 +472,20 @@ function App() {
     return (
       <Homepage 
         gameModes={gameConfig?.game_modes || []} 
-        onStartGame={handleStartGame} 
+        onStartGame={handleStartGame}
+        onStartMultiplayer={handleStartMultiplayer}
+      />
+    )
+  }
+
+  // Show lobby for multiplayer matchmaking
+  if (currentView === 'lobby' && lobbyData) {
+    return (
+      <GameLobby
+        modeId={lobbyData.modeId}
+        modeName={lobbyData.modeName}
+        onGameStart={handleMultiplayerGameStart}
+        onCancel={handleCancelLobby}
       />
     )
   }
