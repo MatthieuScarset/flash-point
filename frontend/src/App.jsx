@@ -52,6 +52,7 @@ function App() {
   const [currentView, setCurrentView] = useState('homepage') // 'homepage', 'lobby', or 'game'
   const [lobbyData, setLobbyData] = useState(null) // { modeId, modeName }
   const [multiplayerGame, setMultiplayerGame] = useState(null) // game data from matchmaking
+  const [spawnedBlocks, setSpawnedBlocks] = useState(0) // track spawned blocks for max limit
 
   // 1. Load the full strategy config
   useEffect(() => {
@@ -126,6 +127,7 @@ function App() {
     setCurrentView('homepage')
     setMultiplayerGame(null)
     setLobbyData(null)
+    setSpawnedBlocks(0)
     setLevelState({ started: false, remainingTime: null, status: 'idle' })
     if (levelTimerRef.current) {
       clearInterval(levelTimerRef.current)
@@ -327,6 +329,12 @@ function App() {
   // 4. Update spawner logic
   const spawnBlock = () => {
     if (engineRef.current && activeMode && sceneRef.current) {
+      // Check if max blocks limit reached
+      const maxBlocks = activeMode.spawner?.max_blocks
+      if (maxBlocks && spawnedBlocks >= maxBlocks) {
+        return // Don't spawn if limit reached
+      }
+
       // Pick allowed blocks from the active level when running, otherwise fall back to mode spawner
       const allowed = (activeLevel && levelState.started && activeLevel.allowed_blocks && activeLevel.allowed_blocks.length)
         ? activeLevel.allowed_blocks
@@ -350,6 +358,7 @@ function App() {
         const position = { x, y }
         const block = createBlock(blockConfig, position)
         Composite.add(engineRef.current.world, block)
+        setSpawnedBlocks(prev => prev + 1)
       }
     }
   }
@@ -506,12 +515,24 @@ function App() {
             <p className='text-sm text-[#9fb0cc] mb-4'>{activeMode.description}</p>
 
             <div className='flex gap-2 items-center justify-center flex-wrap'>
-              <button 
-                className='px-4 py-2 text-sm font-medium text-[#e6eef8] bg-[#6D28D9]/80 rounded-md cursor-pointer transition-all duration-150 hover:bg-[#6D28D9]'
-                onClick={spawnBlock}
-              >
-                Spawn Block
-              </button>
+              {(() => {
+                const maxBlocks = activeMode.spawner?.max_blocks
+                const remaining = maxBlocks ? maxBlocks - spawnedBlocks : null
+                const isDisabled = maxBlocks && spawnedBlocks >= maxBlocks
+                return (
+                  <button 
+                    className={`px-4 py-2 text-sm font-medium text-[#e6eef8] rounded-md cursor-pointer transition-all duration-150 ${
+                      isDisabled 
+                        ? 'bg-gray-500/50 cursor-not-allowed' 
+                        : 'bg-[#6D28D9]/80 hover:bg-[#6D28D9]'
+                    }`}
+                    onClick={spawnBlock}
+                    disabled={isDisabled}
+                  >
+                    Spawn Block{remaining !== null ? ` (${remaining})` : ''}
+                  </button>
+                )
+              })()}
             </div>
 
             <div className='mt-2 text-xs text-[#9fb0cc]'>

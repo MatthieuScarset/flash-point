@@ -49,6 +49,11 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
                     🧱 {mode.spawner.allowed_blocks.length} block types
                   </span>
                 )}
+                {mode.spawner?.max_blocks && (
+                  <span className="text-xs text-[#6ea0d6]">
+                    📦 {mode.spawner.max_blocks} max blocks
+                  </span>
+                )}
               </div>
               <button 
                 className="w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg cursor-pointer transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 bg-[#2a3040] hover:bg-[#353d50] border border-white/10"
