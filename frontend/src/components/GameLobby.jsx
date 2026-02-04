@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useAccount } from 'wagmi'
 import { matchmaking } from '../services/matchmaking'
 import { yellowNetwork, BET_AMOUNT } from '../services/yellowNetwork'
@@ -10,6 +10,12 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
   const [opponent, setOpponent] = useState(null)
   const [gameData, setGameData] = useState(null)
   const [countdown, setCountdown] = useState(null)
+  
+  // Use ref to avoid stale closure and prevent re-running effect when callback changes
+  const onGameStartRef = useRef(onGameStart)
+  useEffect(() => {
+    onGameStartRef.current = onGameStart
+  }, [onGameStart])
 
   useEffect(() => {
     let mounted = true
@@ -54,7 +60,9 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
             setCountdown(prev => {
               if (prev <= 1) {
                 clearInterval(timer)
-                onGameStart(data)
+                // Call onGameStart outside of the setState updater to avoid
+                // updating parent state during render
+                setTimeout(() => onGameStartRef.current(data), 0)
                 return 0
               }
               return prev - 1
@@ -83,7 +91,7 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
       matchmaking.leaveLobby(modeId)
       matchmaking.disconnect()
     }
-  }, [modeId, address, onGameStart])
+  }, [modeId, address])
 
   const handleCancel = () => {
     matchmaking.leaveLobby(modeId)

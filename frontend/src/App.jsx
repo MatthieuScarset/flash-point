@@ -223,14 +223,17 @@ function App() {
 
     // Add mouse control (attach to the canvas and support devicePixelRatio)
     const mouse = Matter.Mouse.create(render.canvas)
-    // pixel ratio between the internal canvas pixels and logical scene pixels
-    const ratio = window.devicePixelRatio || 1
-    mouse.pixelRatio = ratio
+    // Set pixelRatio to match the canvas scaling
+    mouse.pixelRatio = window.devicePixelRatio || 1
+    
     const mouseConstraint = Matter.MouseConstraint.create(engine, {
       mouse: mouse,
       constraint: { stiffness: 0.2, render: { visible: false } }
     })
     Composite.add(world, mouseConstraint)
+
+    // Keep render.mouse in sync so Matter.js can properly map mouse coordinates
+    render.mouse = mouse
 
     // Drag events (use stable handler functions so we can remove them on cleanup)
     const onStartDrag = (event) => {
@@ -258,10 +261,8 @@ function App() {
       rightWall = Bodies.rectangle(width + 10, height / 2, 20, height * 2, { isStatic: true, render: { visible: false } })
       Composite.add(world, [ground, topWall, leftWall, rightWall])
 
-      // Update mouse to point to new canvas element and recompute pixel ratio
-      const ratio = window.devicePixelRatio || 1
+      // Update mouse element reference
       mouse.element = render.canvas
-      mouse.pixelRatio = ratio
     }
 
     window.addEventListener('resize', handleResize)
