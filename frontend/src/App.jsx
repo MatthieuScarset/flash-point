@@ -398,6 +398,68 @@ function App() {
     }
   }, [currentView, activeMode])
 
+  // Calculate the tower height (distance from ground to highest block)
+  const calculateTowerHeight = useCallback(() => {
+    if (!engineRef.current || !sceneRef.current) return 0
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    const container = sceneRef.current
+    const height = container.clientHeight || 600
+    const groundY = height - Math.max(20, Math.round(height * 0.06))
+    
+    // Find the highest point (lowest Y value) among non-static bodies
+    let highestY = groundY
+    bodies.forEach(b => {
+      if (!b.isStatic) {
+        // Account for block size (bounds)
+        const topY = b.bounds.min.y
+        if (topY < highestY) {
+          highestY = topY
+        }
+      }
+    })
+    
+    // Height is distance from ground to highest point
+    const towerHeight = Math.max(0, groundY - highestY)
+    return Math.round(towerHeight)
+  }, [])
+
+  // Count total blocks placed
+  const countTotalBlocks = useCallback(() => {
+    if (!engineRef.current) return 0
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    return bodies.filter(b => !b.isStatic).length
+  }, [])
+
+  // Check game result when session ends
+  const checkGameResult = useCallback(() => {
+    if (!activeMode) return null
+    
+    const towerHeight = calculateTowerHeight()
+    const totalBlocks = countTotalBlocks()
+    const winCondition = activeMode.rules?.win_condition || activeMode.win_condition
+    
+    const result = {
+      towerHeight,
+      totalBlocks,
+      turnsPlayed: Math.floor(turnCount / 2) + 1,
+      status: 'completed'
+    }
+    
+    // Check specific win conditions
+    if (winCondition?.type === 'max_height') {
+      // For max_height, there's no specific target - just measure achievement
+      result.status = towerHeight > 100 ? 'great' : towerHeight > 50 ? 'good' : 'completed'
+    } else if (winCondition?.type === 'count_blocks') {
+      const target = winCondition.count || 10
+      result.targetBlocks = target
+      result.status = totalBlocks >= target ? 'won' : 'failed'
+    }
+    
+    return result
+  }, [activeMode, calculateTowerHeight, countTotalBlocks, turnCount])
+
   // Check game result when session time reaches 0
   useEffect(() => {
     if (sessionTime === 0 && currentView === 'game' && !gameResult) {
@@ -699,68 +761,6 @@ function App() {
     const bodies = Composite.allBodies(world)
     return bodies.reduce((acc, b) => acc + (b.label === blockId ? 1 : 0), 0)
   }
-
-  // Calculate the tower height (distance from ground to highest block)
-  const calculateTowerHeight = useCallback(() => {
-    if (!engineRef.current || !sceneRef.current) return 0
-    const world = engineRef.current.world
-    const bodies = Composite.allBodies(world)
-    const container = sceneRef.current
-    const height = container.clientHeight || 600
-    const groundY = height - Math.max(20, Math.round(height * 0.06))
-    
-    // Find the highest point (lowest Y value) among non-static bodies
-    let highestY = groundY
-    bodies.forEach(b => {
-      if (!b.isStatic) {
-        // Account for block size (bounds)
-        const topY = b.bounds.min.y
-        if (topY < highestY) {
-          highestY = topY
-        }
-      }
-    })
-    
-    // Height is distance from ground to highest point
-    const towerHeight = Math.max(0, groundY - highestY)
-    return Math.round(towerHeight)
-  }, [])
-
-  // Count total blocks placed
-  const countTotalBlocks = useCallback(() => {
-    if (!engineRef.current) return 0
-    const world = engineRef.current.world
-    const bodies = Composite.allBodies(world)
-    return bodies.filter(b => !b.isStatic).length
-  }, [])
-
-  // Check game result when session ends
-  const checkGameResult = useCallback(() => {
-    if (!activeMode) return null
-    
-    const towerHeight = calculateTowerHeight()
-    const totalBlocks = countTotalBlocks()
-    const winCondition = activeMode.rules?.win_condition || activeMode.win_condition
-    
-    const result = {
-      towerHeight,
-      totalBlocks,
-      turnsPlayed: Math.floor(turnCount / 2) + 1,
-      status: 'completed'
-    }
-    
-    // Check specific win conditions
-    if (winCondition?.type === 'max_height') {
-      // For max_height, there's no specific target - just measure achievement
-      result.status = towerHeight > 100 ? 'great' : towerHeight > 50 ? 'good' : 'completed'
-    } else if (winCondition?.type === 'count_blocks') {
-      const target = winCondition.count || 10
-      result.targetBlocks = target
-      result.status = totalBlocks >= target ? 'won' : 'failed'
-    }
-    
-    return result
-  }, [activeMode, calculateTowerHeight, countTotalBlocks, turnCount])
 
   const checkLevelWin = () => {
     if (!activeLevel || !engineRef.current || !activeLevel.target) return
