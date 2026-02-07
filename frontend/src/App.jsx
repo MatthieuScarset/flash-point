@@ -42,13 +42,15 @@ function App() {
   const sceneRef = useRef(null)
   const engineRef = useRef(null)
   const levelTimerRef = useRef(null)
+  const sessionTimerRef = useRef(null)
+  const mouseConstraintRef = useRef(null)
   const [gameConfig, setGameConfig] = useState(null)
   const [activeMode, setActiveMode] = useState(null)
   const [levels, setLevels] = useState([])
   const [activeLevelId, setActiveLevelId] = useState(null)
   const [activeLevel, setActiveLevel] = useState(null)
   const [levelState, setLevelState] = useState({ started: false, remainingTime: null, status: 'idle' })
-  const [draggedBody, setDraggedBody] = useState(null)
+  const [sessionTime, setSessionTime] = useState(null) // session countdown timer
   const [currentView, setCurrentView] = useState('homepage') // 'homepage', 'lobby', or 'game'
   const [lobbyData, setLobbyData] = useState(null) // { modeId, modeName }
   const [multiplayerGame, setMultiplayerGame] = useState(null) // game data from matchmaking
@@ -128,10 +130,15 @@ function App() {
     setMultiplayerGame(null)
     setLobbyData(null)
     setSpawnedBlocks(0)
+    setSessionTime(null)
     setLevelState({ started: false, remainingTime: null, status: 'idle' })
     if (levelTimerRef.current) {
       clearInterval(levelTimerRef.current)
       levelTimerRef.current = null
+    }
+    if (sessionTimerRef.current) {
+      clearInterval(sessionTimerRef.current)
+      sessionTimerRef.current = null
     }
   }
 
@@ -232,6 +239,7 @@ function App() {
       mouse: mouse,
       constraint: { stiffness: 0.2, render: { visible: false } }
     })
+    mouseConstraintRef.current = mouseConstraint
     Composite.add(world, mouseConstraint)
 
     // Keep render.mouse in sync so Matter.js can properly map mouse coordinates
@@ -323,8 +331,46 @@ function App() {
         clearInterval(levelTimerRef.current)
         levelTimerRef.current = null
       }
+      if (sessionTimerRef.current) {
+        clearInterval(sessionTimerRef.current)
+        sessionTimerRef.current = null
+      }
     }
   }, [activeMode, gameConfig, currentView])
+
+  // Start session timer when game view loads
+  useEffect(() => {
+    if (currentView !== 'game' || !activeMode) return
+
+    const sessionDuration = activeMode.rules?.session_duration
+    if (!sessionDuration) return
+
+    // Initialize session time
+    setSessionTime(sessionDuration)
+
+    // Start countdown
+    sessionTimerRef.current = setInterval(() => {
+      setSessionTime(prev => {
+        if (prev <= 1) {
+          clearInterval(sessionTimerRef.current)
+          sessionTimerRef.current = null
+          // Disable mouse constraint when time is up
+          if (mouseConstraintRef.current && engineRef.current) {
+            Matter.Composite.remove(engineRef.current.world, mouseConstraintRef.current)
+          }
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => {
+      if (sessionTimerRef.current) {
+        clearInterval(sessionTimerRef.current)
+        sessionTimerRef.current = null
+      }
+    }
+  }, [currentView, activeMode])
 
   // 4. Update spawner logic
   const spawnBlock = () => {
@@ -514,11 +560,22 @@ function App() {
             <h1 className='text-2xl font-bold text-[#e6eef8] mb-2'>{activeMode.name}</h1>
             <p className='text-sm text-[#9fb0cc] mb-4'>{activeMode.description}</p>
 
+            {/* Session Timer */}
+            {sessionTime !== null && (
+              <div className={`text-4xl font-bold mb-4 ${sessionTime <= 5 ? 'text-red-400 animate-pulse' : 'text-yellow-400'}`}>
+                ⏱️ {sessionTime}s
+              </div>
+            )}
+            {sessionTime === 0 && (
+              <div className='text-xl font-bold text-red-400 mb-4'>Time's up!</div>
+            )}
+
             <div className='flex gap-2 items-center justify-center flex-wrap'>
               {(() => {
                 const maxBlocks = activeMode.spawner?.max_blocks
                 const remaining = maxBlocks ? maxBlocks - spawnedBlocks : null
-                const isDisabled = maxBlocks && spawnedBlocks >= maxBlocks
+                const isTimeUp = sessionTime === 0
+                const isDisabled = isTimeUp || (maxBlocks && spawnedBlocks >= maxBlocks)
                 return (
                   <button 
                     className={`px-4 py-2 text-sm font-medium text-[#e6eef8] rounded-md cursor-pointer transition-all duration-150 ${
@@ -529,7 +586,7 @@ function App() {
                     onClick={spawnBlock}
                     disabled={isDisabled}
                   >
-                    Spawn Block{remaining !== null ? ` (${remaining})` : ''}
+                    {isTimeUp ? 'Game Over' : `Spawn Block${remaining !== null ? ` (${remaining})` : ''}`}
                   </button>
                 )
               })()}
