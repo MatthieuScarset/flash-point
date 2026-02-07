@@ -49,53 +49,40 @@ start_conditions:
 # A list of all playable game modes.
 # -----------------------------------------------------------------------------
 game_modes:
-  - id: 'stacker_challenge'
-    name: 'Stacker Challenge'
-    description: 'Build the tallest tower before time runs out!'
+  - id: 'collaborative_stacking'
+    name: 'Collaborative Stacking'
+    description: 'Team up with another player! Take turns placing blocks to build the tallest tower together.'
+    multiplayer: true
+    player_count: 2
+    turn_based: true
     start_condition: 'default_start'
     rules:
-      session_duration: 20
+      session_duration: 120
+      turn_duration: 15
+      win_condition:
+        type: 'max_height'
+    spawner:
+      base_rate: 1.0
+      max_blocks: 20
+      blocks_per_turn: 1
+      allowed_blocks: ['stable_hex', 'volatile_hex', 'heavy_square']
+
+  - id: 'training_mode'
+    name: 'Training Mode'
+    description: 'Practice your stacking skills solo. No pressure, just you and the blocks!'
+    multiplayer: false
+    player_count: 1
+    start_condition: null
+    rules:
+      session_duration: 60
       win_condition:
         type: 'max_height'
     spawner:
       base_rate: 1.5
-      max_blocks: 10
-      allowed_blocks: ['stable_hex', 'volatile_hex', 'heavy_square']
-
-  - id: 'stability_test'
-    name: 'Stability Test'
-    description: 'Build a solid tower to survive a votality earthquake.'
-    start_condition: null
-    rules:
-      - phase: 'build'
-        duration: 120
-      - phase: 'test'
-        duration: 3
-        # We can add phase-specific physics changes here in the future
-        # physics_multiplier: { gravity: 1.5 }
-    win_condition:
-      type: 'stability' # Measures time without any blocks falling during the 'test' phase.
-    spawner:
-      base_rate: 1.0
       max_blocks: 15
       allowed_blocks: ['stable_hex', 'volatile_hex', 'heavy_square']
-
-  - id: 'uniformity_check'
-    name: 'Uniformity Check'
-    description: 'Build a balanced tower to maximize your score.'
-    start_condition: null
-    rules:
-      session_duration: 240
-    win_condition:
-      type: 'uniformity'
-      # We want a 1:1 ratio of stable to volatile blocks
-      target_balance: { stable_hex: 1, volatile_hex: 1 }
-    spawner:
-      base_rate: 2.0
-      max_blocks: 20
-      allowed_blocks: ['stable_hex', 'volatile_hex']
 
 # -----------------------------------------------------------------------------
 # The game mode to load when the app starts.
 # -----------------------------------------------------------------------------
-active_game_mode: 'stacker_challenge'
+active_game_mode: 'training_mode'

@@ -55,6 +55,7 @@ function App() {
   const [lobbyData, setLobbyData] = useState(null) // { modeId, modeName }
   const [multiplayerGame, setMultiplayerGame] = useState(null) // game data from matchmaking
   const [spawnedBlocks, setSpawnedBlocks] = useState(0) // track spawned blocks for max limit
+  const [draggedBody, setDraggedBody] = useState(null) // currently dragged block
 
   // 1. Load the full strategy config
   useEffect(() => {

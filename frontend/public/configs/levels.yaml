@@ -1,27 +1,40 @@
 # levels.yaml
 
 levels:
-  - id: 'level_1'
-    name: 'Volatile Tower I'
-    description: 'Build a tower of 6 volatile blocks.'
-    allowed_blocks: ['volatile_hex']
+  - id: 'training_basic'
+    name: 'Basic Training'
+    description: 'Learn the basics of stacking blocks.'
+    game_mode: 'training_mode'
+    allowed_blocks: ['stable_hex', 'heavy_square']
     target:
       type: 'count_blocks'
-      block_id: 'volatile_hex'
-      count: 10
+      count: 5
     time_limit: 60
-    start_blocks: [
-    ]
+    start_blocks: []
     physics: {}
 
-  - id: 'practice_balanced'
-    name: 'Balanced Practice'
-    description: 'Practice building with stable hexes.'
-    allowed_blocks: ['stable_hex']
+  - id: 'training_advanced'
+    name: 'Advanced Training'
+    description: 'Master all block types including volatile hexes.'
+    game_mode: 'training_mode'
+    allowed_blocks: ['stable_hex', 'volatile_hex', 'heavy_square']
     target:
       type: 'count_blocks'
-      block_id: 'stable_hex'
-      count: 6
-    time_limit: 45
+      count: 10
+    time_limit: 90
     start_blocks: []
+    physics: {}
+
+  - id: 'collab_tower'
+    name: 'Tower Together'
+    description: 'Work with your partner to build a 15-block tower.'
+    game_mode: 'collaborative_stacking'
+    allowed_blocks: ['stable_hex', 'volatile_hex', 'heavy_square']
+    target:
+      type: 'count_blocks'
+      count: 15
+    time_limit: 120
+    start_blocks:
+      - block_id: 'heavy_square'
+        position: { x: '50%', y: '85%' }
     physics: {}

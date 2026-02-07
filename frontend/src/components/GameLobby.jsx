@@ -73,7 +73,7 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
         matchmaking.on('opponent_disconnected', () => {
           if (!mounted) return
           setStatus('error')
-          setError('Opponent disconnected. Your bet will be refunded.')
+          setError('Partner disconnected. Your entry fee will be refunded.')
         })
 
       } catch (err) {
@@ -108,11 +108,11 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
       <div className="bg-[#1a1f2e] border border-white/10 rounded-2xl p-8 max-w-md w-full mx-4 text-center">
         {/* Header */}
         <h2 className="text-2xl font-bold text-white mb-2">{modeName}</h2>
-        <p className="text-[#9fb0cc] text-sm mb-6">1v1 Competitive Match</p>
+        <p className="text-[#9fb0cc] text-sm mb-6">2-Player Collaborative Mode</p>
 
-        {/* Bet Amount */}
+        {/* Entry Fee */}
         <div className="bg-white/5 rounded-lg p-4 mb-6">
-          <p className="text-xs text-[#6ea0d6] uppercase tracking-wide mb-1">Your Bet</p>
+          <p className="text-xs text-[#6ea0d6] uppercase tracking-wide mb-1">Entry Fee</p>
           <p className="text-3xl font-bold text-green-400">${formatUSDC(BET_AMOUNT)} USDC</p>
         </div>
 
@@ -139,8 +139,8 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
                 <div className="w-16 h-16 border-4 border-purple-500/30 rounded-full"></div>
                 <div className="absolute inset-0 w-16 h-16 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
               </div>
-              <p className="text-white text-lg">Searching for opponent...</p>
-              <p className="text-[#9fb0cc] text-sm">This usually takes less than 30 seconds</p>
+              <p className="text-white text-lg">Finding a partner...</p>
+              <p className="text-[#9fb0cc] text-sm">Looking for someone to build with you!</p>
               
               {/* Animated dots */}
               <div className="flex gap-1 mt-2">
@@ -153,8 +153,8 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
 
           {status === 'matched' && (
             <div className="flex flex-col items-center gap-3">
-              <div className="text-5xl">🎮</div>
-              <p className="text-green-400 text-xl font-bold">Opponent Found!</p>
+              <div className="text-5xl">🤝</div>
+              <p className="text-green-400 text-xl font-bold">Partner Found!</p>
               {opponent && (
                 <p className="text-[#9fb0cc] text-sm font-mono">
                   {opponent.address.slice(0, 6)}...{opponent.address.slice(-4)}
@@ -177,12 +177,12 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
           )}
         </div>
 
-        {/* Prize Pool Info */}
+        {/* Reward Info */}
         {status === 'waiting' && (
-          <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/20 rounded-lg p-4 mb-6">
-            <p className="text-xs text-yellow-400 uppercase tracking-wide mb-1">Prize Pool</p>
+          <div className="bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20 rounded-lg p-4 mb-6">
+            <p className="text-xs text-purple-400 uppercase tracking-wide mb-1">Team Reward Pool</p>
             <p className="text-2xl font-bold text-white">${formatUSDC(BET_AMOUNT) * 2} USDC</p>
-            <p className="text-xs text-[#9fb0cc] mt-1">Winner takes proportional share based on score</p>
+            <p className="text-xs text-[#9fb0cc] mt-1">Build together, earn together based on tower height!</p>
           </div>
         )}
 

@@ -17,7 +17,7 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
           🏗️ FlashPoint
         </h1>
         <p className="text-xl text-[#9fb0cc]">
-          Build the tallest tower. Outsmart the market.
+          Build together. Stack higher. Have fun!
         </p>
       </div>
 
@@ -26,7 +26,7 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
         <h2 className="text-center text-2xl font-semibold mb-6 text-[#e6eef8]">
           Select Game Mode
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {gameModes && gameModes.map((mode) => (
             <div 
               key={mode.id} 
@@ -38,41 +38,49 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
               <p className="text-sm text-[#9fb0cc] leading-relaxed mb-4">
                 {mode.description}
               </p>
-              <div className="flex gap-4 mb-5">
+              <div className="flex flex-wrap gap-3 mb-5">
+                {mode.player_count && (
+                  <span className="text-xs text-[#6ea0d6]">
+                    👥 {mode.player_count} player{mode.player_count > 1 ? 's' : ''}
+                  </span>
+                )}
+                {mode.turn_based && (
+                  <span className="text-xs text-[#6ea0d6]">
+                    🔄 Turn-based
+                  </span>
+                )}
                 {mode.rules?.session_duration && (
                   <span className="text-xs text-[#6ea0d6]">
                     ⏱️ {mode.rules.session_duration}s
                   </span>
                 )}
-                {mode.spawner?.allowed_blocks && (
-                  <span className="text-xs text-[#6ea0d6]">
-                    🧱 {mode.spawner.allowed_blocks.length} block types
-                  </span>
-                )}
                 {mode.spawner?.max_blocks && (
                   <span className="text-xs text-[#6ea0d6]">
-                    📦 {mode.spawner.max_blocks} max blocks
+                    📦 {mode.spawner.max_blocks} blocks
                   </span>
                 )}
               </div>
-              <button 
-                className="w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg cursor-pointer transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 bg-[#2a3040] hover:bg-[#353d50] border border-white/10"
-                onClick={() => onStartGame(mode.id)}
-              >
-                🎯 Train Alone
-              </button>
-              <button 
-                className={`w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg transition-all duration-150 ${
-                  isConnected 
-                    ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400' 
-                    : 'bg-gray-600 cursor-not-allowed opacity-50'
-                }`}
-                onClick={() => isConnected && onStartMultiplayer(mode.id, mode.name)}
-                disabled={!isConnected}
-                title={!isConnected ? 'Connect wallet to start a game' : 'Bet 1 USDC to play against others'}
-              >
-                {isConnected ? '💰 Play for 1 USDC' : '🔒 Connect to play'}
-              </button>
+              {mode.multiplayer ? (
+                <button 
+                  className={`w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg transition-all duration-150 ${
+                    isConnected 
+                      ? 'cursor-pointer hover:-translate-y-0.5 active:translate-y-0 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-400 hover:to-pink-400' 
+                      : 'bg-gray-600 cursor-not-allowed opacity-50'
+                  }`}
+                  onClick={() => isConnected && onStartMultiplayer(mode.id, mode.name)}
+                  disabled={!isConnected}
+                  title={!isConnected ? 'Connect wallet to find a partner' : 'Find a partner to build together!'}
+                >
+                  {isConnected ? '👥 Find Partner (1 USDC)' : '🔒 Connect Wallet'}
+                </button>
+              ) : (
+                <button 
+                  className="w-full py-3 px-6 my-2 text-base font-semibold text-white rounded-lg cursor-pointer transition-all duration-150 hover:-translate-y-0.5 active:translate-y-0 bg-[#2a3040] hover:bg-[#353d50] border border-white/10"
+                  onClick={() => onStartGame(mode.id)}
+                >
+                  🎯 Start Training
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -85,9 +93,10 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
             🎯 How to Play
           </h3>
           <ul className="pl-5 text-[#9fb0cc] leading-loose list-disc">
+            <li><strong>Training:</strong> Practice solo, no pressure!</li>
+            <li><strong>Collaborative:</strong> Take turns with a partner</li>
             <li>Drag and drop blocks to build your tower</li>
-            <li>Stack blocks as high as possible</li>
-            <li>Complete level objectives before time runs out</li>
+            <li>Stack as high as possible before time runs out</li>
           </ul>
         </div>
         <div className="bg-white/[0.02] border border-white/[0.06] rounded-xl p-6">
