@@ -1,21 +1,26 @@
 import React from 'react'
 import { WagmiProvider, createConfig, http } from 'wagmi'
-import { mainnet, polygon, arbitrum, optimism, base } from 'wagmi/chains'
+import { mainnet, polygon, arbitrum, optimism, base, baseSepolia } from 'wagmi/chains'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { injected } from 'wagmi/connectors'
 
-// Create wagmi config
+// Yellow Network supported chains
+// Base Sepolia is recommended for testing
+// See: https://docs.yellow.org/
+
+// Create wagmi config with Yellow Network supported chains
 const config = createConfig({
-  chains: [mainnet, polygon, arbitrum, optimism, base],
+  chains: [baseSepolia, base, mainnet, polygon, arbitrum, optimism],
   connectors: [
     injected(),
   ],
   transports: {
+    [baseSepolia.id]: http(), // Yellow Network Testnet
+    [base.id]: http(),        // Yellow Network Mainnet
     [mainnet.id]: http(),
     [polygon.id]: http(),
     [arbitrum.id]: http(),
     [optimism.id]: http(),
-    [base.id]: http(),
   },
 })
 

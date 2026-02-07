@@ -51,17 +51,44 @@ Loser Rewards: Even the losing player receives a portion of their stake back and
 
 ## 🏗️ Technical Architecture
 
-* Frontend: React + Three.js (for 3D rendering) or Phaser (for 2D logic).
-* Backend: Node.js with Socket.io for ultra-low latency 1v1 synchronization.
-* L3 Integration: Yellow Network SDK for real-time liquidity data and peer-to-peer settlement via state channels.
-* Physics Engine: Matter.js or Cannon.js to handle hexagonal collisions and stability.
+* **Frontend**: React with Vite for fast development and Tailwind CSS for styling
+* **Backend**: Node.js with Socket.io for ultra-low latency 1v1 synchronization
+* **State Channels**: [Yellow Network Nitrolite SDK](https://www.npmjs.com/package/@erc7824/nitrolite) for off-chain betting and instant settlement
+* **Physics Engine**: Matter.js for 2D hexagonal block physics and collisions
+* **Wallet**: Wagmi/Viem for Web3 wallet integration
+
+## ⚡ Yellow Network Integration
+
+FlashPoint uses Yellow Network's Nitrolite protocol for instant, gas-free betting:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Player 1   │◄───►│  ClearNode  │◄───►│  Player 2   │
+│   Wallet    │     │ (Off-chain) │     │   Wallet    │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       └───────────────────┴───────────────────┘
+                           │
+                   ┌───────▼───────┐
+                   │   Nitrolite   │
+                   │    Contract   │
+                   └───────────────┘
+```
+
+Key features:
+- **Session-based betting**: Create a state channel when matched, settle when game ends
+- **Zero gas during gameplay**: All state updates happen off-chain
+- **Proportional payouts**: Winners get rewards based on performance ratio
+- **Instant settlement**: No waiting for block confirmations during gameplay
+
+See [docs/YELLOW_NETWORK.md](docs/YELLOW_NETWORK.md) for detailed integration documentation.
 
 ## 💰 Economic Model
 
 | Feature      | Description                                                              |
 |--------------|--------------------------------------------------------------------------|
-| The Stake    | Equal buy-in from both players (e.g., 50 YELLOW tokens each).            |
-| The Split    | Final payout calculated by the ratio of successful blocks stacked.       |
+| The Stake    | Equal buy-in from both players (e.g., 1 USDC each).                      |
+| The Split    | Final payout calculated by the ratio of tower heights.                   |
 | The Burn     | A 2% fee is taken from the pot to fund the ecosystem treasury.           |
 | Consolation  | Losers receive "Broken Hex" (off-chain fragments) for cosmetic upgrades. |
 
@@ -70,13 +97,15 @@ Loser Rewards: Even the losing player receives a portion of their stake back and
 ### Prerequisites
 
 * Node.js v18+
-* A Yellow Network API Key (for ClearSync access)
+* A Web3 wallet (MetaMask recommended)
+* Base Sepolia testnet ETH and USDC for testing
 
 ### Installation
 
 1. Clone the repo: `git clone https://github.com/MatthieuScarset/flash-point.git`
 1. Install dependencies: `npm install`
-1. Configure your Strategy: Edit `src/configs/rules.yaml` to adjust block physics and reward ratios.
+1. Configure environment: Copy `frontend/.env.example` to `frontend/.env.local`
+1. Configure your Strategy: Edit `frontend/public/configs/strategy.yaml` to adjust block physics and reward ratios
 1. Run the local dev server: `npm run start`
 
 Frontend (React): Change directory into `frontend/`, then run:
@@ -124,7 +153,13 @@ This will start the Vite dev server for the UI (port 5173 by default).
   * Server-side "Master Clock" to ensure both players get identical block sequences.
   * Sync block "settle" positions (x, y, rotation) via Socket.io to render the opponent's tower.
 
-### Phase 4: Yellow Network Integration
+### Phase 4: Yellow Network Integration ✅
 * **Staking:** Use Nitrolite SDK to open a state channel for the pot.
 * **End Game:** Calculate final height ratio ($H_1 / (H_1 + H_2)$).
-* **Settlement:** Call `settle()` to distribute tokens proportionally to players' wallets.
+* **Settlement:** Call `settleGameSession()` to distribute tokens proportionally to players' wallets.
+
+**Implementation Details:**
+- `nitroliteClient.js` - Core Nitrolite client for state channel operations
+- `useYellowSession.js` - React hook for session management  
+- `GameSettlement.jsx` - UI component for on-chain settlement
+- `YellowNetworkProvider.jsx` - Global context provider

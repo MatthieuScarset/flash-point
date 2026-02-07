@@ -1,11 +1,31 @@
-import React from 'react'
+import React, { useState } from 'react'
+import { useAccount } from 'wagmi'
 import { getResultMessage } from '../../utils/gameUtils'
+import GameSettlement from './GameSettlement'
 
 /**
- * Game result display component
+ * Game result display component with Yellow Network settlement
  */
-function GameResult({ gameResult, onBackToHome }) {
+function GameResult({ 
+  gameResult, 
+  onBackToHome,
+  sessionId = null,
+  opponentAddress = null,
+  betAmount = null 
+}) {
+  const { address } = useAccount()
+  const [isSettled, setIsSettled] = useState(false)
+  
   if (!gameResult) return null
+
+  const handleSettlementComplete = (result) => {
+    console.log('Settlement complete:', result)
+    setIsSettled(true)
+  }
+
+  const handleSkipSettlement = () => {
+    setIsSettled(true)
+  }
 
   return (
     <div className='mb-6 p-6 bg-gradient-to-b from-white/10 to-white/5 border border-white/20 rounded-xl'>
@@ -29,17 +49,33 @@ function GameResult({ gameResult, onBackToHome }) {
       </div>
       
       {gameResult.targetBlocks && (
-        <div className={`text-sm ${gameResult.status === 'won' ? 'text-green-400' : 'text-yellow-400'}`}>
+        <div className={`text-sm ${gameResult.status === 'won' ? 'text-green-400' : 'text-yellow-400'} mb-4`}>
           Target: {gameResult.totalBlocks}/{gameResult.targetBlocks} blocks
         </div>
       )}
+
+      {/* Yellow Network Settlement */}
+      {!isSettled && (
+        <GameSettlement
+          gameResult={gameResult}
+          sessionId={sessionId}
+          player1Address={address}
+          player2Address={opponentAddress}
+          betAmount={betAmount}
+          onSettlementComplete={handleSettlementComplete}
+          onSkip={handleSkipSettlement}
+        />
+      )}
       
-      <button 
-        className='mt-4 px-6 py-3 text-base font-bold text-white rounded-lg cursor-pointer transition-all duration-150 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500'
-        onClick={onBackToHome}
-      >
-        🏠 Back to Menu
-      </button>
+      {/* Back to Menu Button - show after settlement or if no session */}
+      {(isSettled || !sessionId) && (
+        <button 
+          className='mt-4 w-full px-6 py-3 text-base font-bold text-white rounded-lg cursor-pointer transition-all duration-150 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500'
+          onClick={onBackToHome}
+        >
+          🏠 Back to Menu
+        </button>
+      )}
     </div>
   )
 }
