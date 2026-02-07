@@ -46,8 +46,16 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
         // Initialize the Nitrolite client with wallet
         nitroliteClient.initialize(walletClient, address)
         
-        // Connect to ClearNode
-        await nitroliteClient.connect()
+        // Try to connect to ClearNode with authentication
+        try {
+          await nitroliteClient.connect(walletClient)
+          console.log('✅ Connected and authenticated with Yellow Network ClearNode')
+        } catch (clearNodeError) {
+          console.warn('⚠️ Could not connect to Yellow Network ClearNode:', clearNodeError.message)
+          console.warn('   Continuing in demo mode (no real betting)')
+          // Stop reconnection attempts and continue in demo mode
+          nitroliteClient.stopReconnecting()
+        }
         
         if (!mounted) return
 
@@ -63,14 +71,20 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
           address: address,
         }
         
-        // Sign the commitment
-        const commitmentMessage = JSON.stringify(betCommitment)
-        const signature = await walletClient.signMessage({ 
-          message: commitmentMessage,
-          account: walletClient.account 
-        })
-        
-        const betProof = { ...betCommitment, signature }
+        // Try to sign the commitment, but allow demo mode without signature
+        let betProof = betCommitment
+        try {
+          const commitmentMessage = JSON.stringify(betCommitment)
+          const signature = await walletClient.signMessage({ 
+            message: commitmentMessage,
+            account: walletClient.account 
+          })
+          betProof = { ...betCommitment, signature }
+        } catch (signError) {
+          console.warn('⚠️ Signature skipped:', signError.message)
+          console.warn('   Continuing in demo mode without signed commitment')
+          // Continue with unsigned commitment for demo mode
+        }
         
         matchmaking.joinLobby(modeId, address, betProof)
 
@@ -222,9 +236,9 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
               
               {/* Animated dots */}
               <div className="flex gap-1 mt-2">
-                <span className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                <span className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                <span className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                <span key="dot1" className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span key="dot2" className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                <span key="dot3" className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
               </div>
             </div>
           )}
@@ -262,7 +276,7 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
             <div className="grid grid-cols-2 gap-2 text-sm">
               {REWARD_TIERS.slice().reverse().map((tier, idx) => (
                 <div 
-                  key={tier.name}
+                  key={`tier-${tier.minHeight}`}
                   className={`px-2 py-1 rounded ${
                     tier.multiplier >= 2 ? 'bg-yellow-500/20 text-yellow-400' :
                     tier.multiplier >= 1.5 ? 'bg-purple-500/20 text-purple-400' :

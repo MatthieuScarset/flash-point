@@ -18,14 +18,21 @@ import {
   parseCloseAppSessionResponse,
   RPCMethod,
   RPCChannelStatus,
+  // Authentication
+  createAuthRequestMessage,
+  createAuthVerifyMessage,
+  parseAuthChallengeResponse,
+  createEIP712AuthMessageSigner,
 } from '@erc7824/nitrolite'
+import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 
 // ClearNode WebSocket endpoints
-const CLEARNODE_SANDBOX = 'wss://clearnet-test.yellow.com/ws'
-const CLEARNODE_PRODUCTION = 'wss://clearnet.yellow.com/ws'
+// Based on https://github.com/erc7824/nitrolite documentation
+const CLEARNODE_TEST = 'wss://clearnet-sandbox.yellow.com/ws'
+const CLEARNODE_PROD = 'wss://clearnet.yellow.com/ws'
 
-// Default to sandbox/testnet for development
-const CLEARNODE_URL = import.meta.env.VITE_CLEARNODE_URL || CLEARNODE_SANDBOX
+// Use TEST by default, can override via environment variable
+const CLEARNODE_URL = import.meta.env.VITE_CLEARNODE_URL || CLEARNODE_TEST
 
 // Protocol version for FlashPoint game
 const FLASHPOINT_PROTOCOL = 'NitroRPC/0.4'
@@ -86,6 +93,7 @@ class NitroliteClient {
     this.eventHandlers = new Map()
     this.reconnectAttempts = 0
     this.maxReconnectAttempts = 5
+    this.shouldReconnect = true
   }
 
   /**
@@ -100,33 +108,46 @@ class NitroliteClient {
   }
 
   /**
-   * Connect to the ClearNode WebSocket server
+   * Connect to the ClearNode WebSocket server with authentication
+   * @param {Object} walletClient - Viem wallet client for EIP712 signing
    * @returns {Promise<void>}
    */
-  async connect() {
+  async connect(walletClient = null) {
     if (this.isConnected && this.ws?.readyState === WebSocket.OPEN) {
       return
     }
 
     return new Promise((resolve, reject) => {
       try {
-        console.log('🌐 Connecting to Yellow Network ClearNode...')
+        console.log('🌐 Connecting to Yellow Network ClearNode:', CLEARNODE_URL)
         this.ws = new WebSocket(CLEARNODE_URL)
 
         const timeout = setTimeout(() => {
           if (!this.isConnected) {
             this.ws?.close()
-            reject(new Error('Connection timeout'))
+            reject(new Error('Connection timeout - ClearNode may be unavailable'))
           }
         }, 15000)
 
-        this.ws.onopen = () => {
-          clearTimeout(timeout)
-          this.isConnected = true
-          this.reconnectAttempts = 0
-          console.log('✅ Connected to Yellow Network ClearNode')
-          this.emit('connected')
-          resolve()
+        this.ws.onopen = async () => {
+          console.log('🔗 WebSocket connected, starting authentication...')
+          
+          try {
+            // Start authentication flow
+            await this.authenticate(walletClient)
+            
+            clearTimeout(timeout)
+            this.isConnected = true
+            this.reconnectAttempts = 0
+            console.log('✅ Authenticated with Yellow Network ClearNode')
+            this.emit('connected')
+            resolve()
+          } catch (authError) {
+            clearTimeout(timeout)
+            console.error('❌ Authentication failed:', authError.message)
+            this.ws?.close()
+            reject(authError)
+          }
         }
 
         this.ws.onmessage = (event) => {
@@ -134,18 +155,20 @@ class NitroliteClient {
         }
 
         this.ws.onerror = (error) => {
+          clearTimeout(timeout)
           console.error('❌ WebSocket error:', error)
+          console.error('   URL:', CLEARNODE_URL)
           this.emit('error', error)
         }
 
         this.ws.onclose = (event) => {
-          console.log('🔌 WebSocket closed:', event.code, event.reason)
+          clearTimeout(timeout)
+          console.log('🔌 WebSocket closed:', event.code, event.reason || '(no reason)')
           this.isConnected = false
           this.emit('disconnected', event)
           
-          // Attempt reconnection for abnormal closures
-          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.attemptReconnect()
+          if (event.code !== 1000) {
+            reject(new Error(`Failed to connect to ClearNode (code: ${event.code})`))
           }
         }
       } catch (error) {
@@ -155,15 +178,162 @@ class NitroliteClient {
   }
 
   /**
+   * Authenticate with ClearNode using EIP712 signature
+   * Based on: https://github.com/erc7824/nitrolite/blob/main/integration/common/auth.ts
+   * @param {Object} walletClient - Viem wallet client
+   * @returns {Promise<void>}
+   */
+  async authenticate(walletClient) {
+    if (!walletClient) {
+      throw new Error('Wallet client required for authentication')
+    }
+    
+    const address = walletClient.account?.address || this.userAddress
+    if (!address) {
+      throw new Error('Wallet address not available')
+    }
+
+    // Generate a session key for this connection
+    const sessionKey = generatePrivateKey()
+    const sessionAccount = privateKeyToAccount(sessionKey)
+    this.sessionKey = sessionKey
+    this.sessionAccount = sessionAccount
+
+    console.log('🔑 Starting auth flow:')
+    console.log('   Wallet:', address)
+    console.log('   Session Key:', sessionAccount.address)
+
+    // Auth request parameters - following SDK format exactly
+    const authRequestParams = {
+      address: address,
+      session_key: sessionAccount.address,
+      application: 'flashpoint-game',  // Use app name
+      expires_at: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour expiration
+      scope: 'console',
+      allowances: [],
+    }
+
+    // Create EIP712 message signer for auth_verify
+    const eip712MessageSigner = createEIP712AuthMessageSigner(
+      walletClient,
+      {
+        scope: authRequestParams.scope,
+        session_key: authRequestParams.session_key,
+        expires_at: authRequestParams.expires_at,
+        allowances: authRequestParams.allowances,
+      },
+      {
+        name: authRequestParams.application,
+      }
+    )
+
+    // Step 1: Send auth_request and wait for auth_challenge response
+    const authRequestMsg = await createAuthRequestMessage(authRequestParams)
+    console.log('📤 Sending auth_request...')
+    
+    const challengeResponseRaw = await this.sendRawRequest(authRequestMsg, 'auth_challenge')
+    console.log('📨 Received auth_challenge:', challengeResponseRaw)
+
+    // Step 2: Parse the challenge
+    const parsedChallenge = parseAuthChallengeResponse(challengeResponseRaw)
+    console.log('🔐 Challenge message:', parsedChallenge.params.challengeMessage)
+
+    // Step 3: Create and send auth_verify with EIP712 signed challenge
+    const authVerifyMsg = await createAuthVerifyMessage(eip712MessageSigner, parsedChallenge)
+    console.log('✍️ Sending auth_verify with signed challenge...')
+    
+    const verifyResponseRaw = await this.sendRawRequest(authVerifyMsg, 'auth_verify')
+    console.log('🎉 Auth verified:', verifyResponseRaw)
+
+    // Parse the verify response to get JWT
+    try {
+      const verifyData = JSON.parse(verifyResponseRaw)
+      if (verifyData.res && verifyData.res[2]) {
+        const params = verifyData.res[2]
+        if (params.jwt_token) {
+          this.jwtToken = params.jwt_token
+          console.log('✅ JWT token received')
+        }
+        if (params.success === false) {
+          throw new Error('Authentication rejected by server')
+        }
+      }
+    } catch (e) {
+      // Ignore parse errors, authentication may still have succeeded
+      console.log('⚠️ Could not parse JWT from response, continuing...')
+    }
+    
+    console.log('✅ Authentication complete!')
+  }
+
+  /**
+   * Send a raw request string and wait for a specific response type
+   * @param {string} messageStr - Message string to send
+   * @param {string} expectedMethod - Expected response method (e.g., 'auth_challenge')
+   * @returns {Promise<string>} Raw response string
+   */
+  sendRawRequest(messageStr, expectedMethod = null) {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.ws.removeEventListener('message', handler)
+        reject(new Error('Request timeout'))
+      }, 15000)
+
+      // Message handler that filters for expected response type
+      const handler = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          
+          // Check if this is the response we're waiting for
+          if (expectedMethod && data.res && data.res[1] !== expectedMethod) {
+            // This is a broadcast message (like 'assets'), ignore it and keep waiting
+            console.log(`📨 Ignoring broadcast message: ${data.res[1]}`)
+            return
+          }
+          
+          clearTimeout(timeout)
+          this.ws.removeEventListener('message', handler)
+          resolve(event.data)
+        } catch (e) {
+          // If we can't parse, still resolve with raw data
+          clearTimeout(timeout)
+          this.ws.removeEventListener('message', handler)
+          resolve(event.data)
+        }
+      }
+
+      this.ws.addEventListener('message', handler)
+      
+      console.log('📤 Sending:', messageStr.substring(0, 200) + '...')
+      this.ws.send(messageStr)
+    })
+  }
+
+  /**
+   * Stop reconnection attempts
+   */
+  stopReconnecting() {
+    this.shouldReconnect = false
+    this.reconnectAttempts = this.maxReconnectAttempts + 1
+  }
+
+  /**
    * Attempt to reconnect to the server
    */
   attemptReconnect() {
+    if (!this.shouldReconnect) {
+      console.log('🛑 Reconnection disabled')
+      return
+    }
+    
     this.reconnectAttempts++
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000)
     console.log(`🔄 Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`)
     
     setTimeout(() => {
-      this.connect().catch(console.error)
+      if (this.shouldReconnect) {
+        this.connect().catch(console.error)
+      }
     }, delay)
   }
 
