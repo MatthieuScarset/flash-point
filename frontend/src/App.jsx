@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import Matter from 'matter-js'
 import yaml from 'js-yaml'
 import Homepage from './components/Homepage'
 import GameLobby from './components/GameLobby'
+import { matchmaking } from './services/matchmaking'
 import './style.css'
 
 const Bodies = Matter.Bodies
@@ -56,6 +57,14 @@ function App() {
   const [multiplayerGame, setMultiplayerGame] = useState(null) // game data from matchmaking
   const [spawnedBlocks, setSpawnedBlocks] = useState(0) // track spawned blocks for max limit
   const [draggedBody, setDraggedBody] = useState(null) // currently dragged block
+  const [gameResult, setGameResult] = useState(null) // { score, status: 'won' | 'completed' }
+  
+  // Collaborative multiplayer state
+  const [isMyTurn, setIsMyTurn] = useState(true) // whose turn it is
+  const [playerNumber, setPlayerNumber] = useState(null) // 1 or 2
+  const [partnerAddress, setPartnerAddress] = useState(null) // partner's wallet address
+  const [turnCount, setTurnCount] = useState(0) // total turns taken
+  const blockBodiesRef = useRef(new Map()) // Map blockId -> Matter.Body for syncing
 
   // 1. Load the full strategy config
   useEffect(() => {
@@ -98,6 +107,9 @@ function App() {
     if (mode) {
       setActiveMode(mode)
       setMultiplayerGame(null)
+      setIsMyTurn(true) // Start with player's turn in training mode
+      setPlayerNumber(1)
+      setTurnCount(0)
       setCurrentView('game')
     }
   }
@@ -114,6 +126,9 @@ function App() {
     if (mode) {
       setActiveMode(mode)
       setMultiplayerGame(gameData)
+      setPlayerNumber(gameData.playerNumber)
+      setIsMyTurn(gameData.isYourTurn)
+      setPartnerAddress(gameData.opponent?.address)
       setLobbyData(null)
       setCurrentView('game')
     }
@@ -132,6 +147,12 @@ function App() {
     setLobbyData(null)
     setSpawnedBlocks(0)
     setSessionTime(null)
+    setGameResult(null)
+    setIsMyTurn(true)
+    setPlayerNumber(null)
+    setPartnerAddress(null)
+    setTurnCount(0)
+    blockBodiesRef.current.clear()
     setLevelState({ started: false, remainingTime: null, status: 'idle' })
     if (levelTimerRef.current) {
       clearInterval(levelTimerRef.current)
@@ -140,6 +161,10 @@ function App() {
     if (sessionTimerRef.current) {
       clearInterval(sessionTimerRef.current)
       sessionTimerRef.current = null
+    }
+    // Disconnect from matchmaking if in multiplayer
+    if (multiplayerGame) {
+      matchmaking.disconnect()
     }
   }
 
@@ -373,9 +398,183 @@ function App() {
     }
   }, [currentView, activeMode])
 
+  // Check game result when session time reaches 0
+  useEffect(() => {
+    if (sessionTime === 0 && currentView === 'game' && !gameResult) {
+      // Small delay to let physics settle
+      const resultTimeout = setTimeout(() => {
+        const result = checkGameResult()
+        if (result) {
+          setGameResult(result)
+          
+          // In multiplayer, send final score to server
+          if (multiplayerGame) {
+            matchmaking.endGame(result.towerHeight)
+          }
+        }
+      }, 500)
+      
+      return () => clearTimeout(resultTimeout)
+    }
+  }, [sessionTime, currentView, gameResult, checkGameResult, multiplayerGame])
+
+  // Helper to get all block states from the physics world
+  const getBlockStates = useCallback(() => {
+    if (!engineRef.current) return []
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    return bodies
+      .filter(b => !b.isStatic)
+      .map(b => ({
+        id: b.id,
+        label: b.label,
+        x: b.position.x,
+        y: b.position.y,
+        angle: b.angle,
+        velocityX: b.velocity.x,
+        velocityY: b.velocity.y
+      }))
+  }, [])
+
+  // Helper to apply block states from partner
+  const applyBlockStates = useCallback((blockStates) => {
+    if (!engineRef.current) return
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    
+    blockStates.forEach(state => {
+      const body = bodies.find(b => b.id === state.id)
+      if (body && !body.isStatic) {
+        Matter.Body.setPosition(body, { x: state.x, y: state.y })
+        Matter.Body.setAngle(body, state.angle)
+        if (state.velocityX !== undefined) {
+          Matter.Body.setVelocity(body, { x: state.velocityX, y: state.velocityY })
+        }
+      }
+    })
+  }, [])
+
+  // Collaborative multiplayer event handlers
+  useEffect(() => {
+    if (currentView !== 'game' || !multiplayerGame) return
+
+    // Handle turn changes from server
+    const handleTurnChanged = (data) => {
+      setIsMyTurn(data.isYourTurn)
+      setTurnCount(data.turnCount)
+      
+      // Apply the block states from partner
+      if (data.blockStates) {
+        applyBlockStates(data.blockStates)
+      }
+      
+      // Enable/disable mouse constraint based on turn
+      if (mouseConstraintRef.current && engineRef.current) {
+        if (data.isYourTurn) {
+          // Re-add mouse constraint if not present
+          const world = engineRef.current.world
+          const bodies = Composite.allBodies(world)
+          if (!bodies.includes(mouseConstraintRef.current)) {
+            Composite.add(world, mouseConstraintRef.current)
+          }
+        }
+      }
+    }
+
+    // Handle block spawned by partner
+    const handleBlockSpawned = (data) => {
+      if (data.spawnedBy !== playerNumber && engineRef.current && gameConfig) {
+        // Partner spawned a block, we need to add it locally
+        const blockConfig = gameConfig.block_library[data.block.label]
+        if (blockConfig) {
+          const body = createBlock(blockConfig, { x: data.block.x, y: data.block.y })
+          body.id = data.block.id // Use same ID for sync
+          Composite.add(engineRef.current.world, body)
+          blockBodiesRef.current.set(data.block.id, body)
+        }
+      }
+      setSpawnedBlocks(data.totalBlocks)
+    }
+
+    // Handle real-time block position updates from partner
+    const handleBlockPositionUpdate = (data) => {
+      if (!engineRef.current) return
+      const world = engineRef.current.world
+      const bodies = Composite.allBodies(world)
+      const body = bodies.find(b => b.id === data.blockId)
+      if (body && !body.isStatic) {
+        Matter.Body.setPosition(body, { x: data.x, y: data.y })
+        if (data.angle !== undefined) {
+          Matter.Body.setAngle(body, data.angle)
+        }
+      }
+    }
+
+    // Handle full game state sync from partner
+    const handleGameStateSync = (data) => {
+      if (data.blockStates) {
+        applyBlockStates(data.blockStates)
+      }
+    }
+
+    matchmaking.on('turn_changed', handleTurnChanged)
+    matchmaking.on('block_spawned', handleBlockSpawned)
+    matchmaking.on('block_position_update', handleBlockPositionUpdate)
+    matchmaking.on('game_state_sync', handleGameStateSync)
+
+    return () => {
+      matchmaking.off('turn_changed', handleTurnChanged)
+      matchmaking.off('block_spawned', handleBlockSpawned)
+      matchmaking.off('block_position_update', handleBlockPositionUpdate)
+      matchmaking.off('game_state_sync', handleGameStateSync)
+    }
+  }, [currentView, multiplayerGame, playerNumber, gameConfig, applyBlockStates])
+
+  // Sync block positions while dragging in multiplayer
+  useEffect(() => {
+    if (!multiplayerGame || !draggedBody || !isMyTurn) return
+
+    const syncInterval = setInterval(() => {
+      if (draggedBody) {
+        matchmaking.syncBlockPosition(
+          draggedBody.id,
+          draggedBody.position.x,
+          draggedBody.position.y,
+          draggedBody.angle
+        )
+      }
+    }, 50) // Sync every 50ms while dragging
+
+    return () => clearInterval(syncInterval)
+  }, [multiplayerGame, draggedBody, isMyTurn])
+
+  // Enable/disable mouse controls based on turn (works for both modes)
+  useEffect(() => {
+    if (!engineRef.current || !mouseConstraintRef.current) return
+
+    const world = engineRef.current.world
+    const mouseConstraint = mouseConstraintRef.current
+
+    if (isMyTurn) {
+      // Enable dragging - add mouse constraint if not present
+      const bodies = Composite.allBodies(world)
+      if (!bodies.includes(mouseConstraint)) {
+        Composite.add(world, mouseConstraint)
+      }
+    } else {
+      // Disable dragging - remove mouse constraint
+      Composite.remove(world, mouseConstraint)
+    }
+  }, [isMyTurn])
+
   // 4. Update spawner logic
   const spawnBlock = () => {
     if (engineRef.current && activeMode && sceneRef.current) {
+      // Only spawn if it's your turn (applies to both modes)
+      if (!isMyTurn) {
+        return
+      }
+
       // Check if max blocks limit reached
       const maxBlocks = activeMode.spawner?.max_blocks
       if (maxBlocks && spawnedBlocks >= maxBlocks) {
@@ -405,8 +604,44 @@ function App() {
         const position = { x, y }
         const block = createBlock(blockConfig, position)
         Composite.add(engineRef.current.world, block)
-        setSpawnedBlocks(prev => prev + 1)
+        
+        // Track the block for syncing
+        blockBodiesRef.current.set(block.id, block)
+        
+        // In collaborative mode, notify partner and update count via server
+        if (multiplayerGame) {
+          matchmaking.spawnBlock({
+            id: block.id,
+            label: blockConfig.label,
+            x: position.x,
+            y: position.y
+          })
+        } else {
+          setSpawnedBlocks(prev => prev + 1)
+        }
       }
+    }
+  }
+
+  // End turn - works for both collaborative and training mode
+  const endTurn = () => {
+    if (!isMyTurn) return
+    
+    if (multiplayerGame) {
+      // Collaborative mode: send to server and wait for partner
+      const blockStates = getBlockStates()
+      matchmaking.endTurn(blockStates)
+      setIsMyTurn(false)
+    } else {
+      // Training mode: simulate turn switch (brief pause then back to player)
+      setIsMyTurn(false)
+      setTurnCount(prev => prev + 1)
+      
+      // Simulate "partner's turn" with a brief delay
+      setTimeout(() => {
+        setTurnCount(prev => prev + 1)
+        setIsMyTurn(true)
+      }, 1000) // 1 second pause to simulate partner
     }
   }
 
@@ -465,11 +700,73 @@ function App() {
     return bodies.reduce((acc, b) => acc + (b.label === blockId ? 1 : 0), 0)
   }
 
+  // Calculate the tower height (distance from ground to highest block)
+  const calculateTowerHeight = useCallback(() => {
+    if (!engineRef.current || !sceneRef.current) return 0
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    const container = sceneRef.current
+    const height = container.clientHeight || 600
+    const groundY = height - Math.max(20, Math.round(height * 0.06))
+    
+    // Find the highest point (lowest Y value) among non-static bodies
+    let highestY = groundY
+    bodies.forEach(b => {
+      if (!b.isStatic) {
+        // Account for block size (bounds)
+        const topY = b.bounds.min.y
+        if (topY < highestY) {
+          highestY = topY
+        }
+      }
+    })
+    
+    // Height is distance from ground to highest point
+    const towerHeight = Math.max(0, groundY - highestY)
+    return Math.round(towerHeight)
+  }, [])
+
+  // Count total blocks placed
+  const countTotalBlocks = useCallback(() => {
+    if (!engineRef.current) return 0
+    const world = engineRef.current.world
+    const bodies = Composite.allBodies(world)
+    return bodies.filter(b => !b.isStatic).length
+  }, [])
+
+  // Check game result when session ends
+  const checkGameResult = useCallback(() => {
+    if (!activeMode) return null
+    
+    const towerHeight = calculateTowerHeight()
+    const totalBlocks = countTotalBlocks()
+    const winCondition = activeMode.rules?.win_condition || activeMode.win_condition
+    
+    const result = {
+      towerHeight,
+      totalBlocks,
+      turnsPlayed: Math.floor(turnCount / 2) + 1,
+      status: 'completed'
+    }
+    
+    // Check specific win conditions
+    if (winCondition?.type === 'max_height') {
+      // For max_height, there's no specific target - just measure achievement
+      result.status = towerHeight > 100 ? 'great' : towerHeight > 50 ? 'good' : 'completed'
+    } else if (winCondition?.type === 'count_blocks') {
+      const target = winCondition.count || 10
+      result.targetBlocks = target
+      result.status = totalBlocks >= target ? 'won' : 'failed'
+    }
+    
+    return result
+  }, [activeMode, calculateTowerHeight, countTotalBlocks, turnCount])
+
   const checkLevelWin = () => {
     if (!activeLevel || !engineRef.current || !activeLevel.target) return
     const t = activeLevel.target
     if (t.type === 'count_blocks') {
-      const count = countBlocksOfType(t.block_id)
+      const count = t.block_id ? countBlocksOfType(t.block_id) : countTotalBlocks()
       if (count >= t.count) {
         // win
         setLevelState(prev => ({ ...prev, status: 'completed', started: false }))
@@ -561,37 +858,133 @@ function App() {
             <h1 className='text-2xl font-bold text-[#e6eef8] mb-2'>{activeMode.name}</h1>
             <p className='text-sm text-[#9fb0cc] mb-4'>{activeMode.description}</p>
 
+            {/* Collaborative Mode Partner Info */}
+            {multiplayerGame && (
+              <div className='mb-4 p-3 bg-white/5 border border-white/10 rounded-lg'>
+                <div className='flex items-center justify-center gap-4 text-sm'>
+                  <span className='text-[#9fb0cc]'>
+                    👥 Playing with: <span className='text-[#6ea0d6] font-mono'>
+                      {partnerAddress ? `${partnerAddress.slice(0, 6)}...${partnerAddress.slice(-4)}` : 'Partner'}
+                    </span>
+                  </span>
+                  <span className='text-[#9fb0cc]'>
+                    You are Player {playerNumber}
+                  </span>
+                </div>
+                <div className={`mt-2 text-lg font-bold ${isMyTurn ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {isMyTurn ? '🎯 Your Turn!' : '⏳ Partner\'s Turn...'}
+                </div>
+                {turnCount > 0 && (
+                  <div className='text-xs text-[#9fb0cc] mt-1'>Turn #{turnCount + 1}</div>
+                )}
+              </div>
+            )}
+
+            {/* Training Mode Turn Info */}
+            {!multiplayerGame && (
+              <div className='mb-4 p-3 bg-white/5 border border-white/10 rounded-lg'>
+                <div className='text-sm text-[#9fb0cc] mb-1'>
+                  🎓 Training Mode — Practice like it's the real thing!
+                </div>
+                <div className={`text-lg font-bold ${isMyTurn ? 'text-green-400' : 'text-yellow-400'}`}>
+                  {isMyTurn ? '🎯 Your Turn!' : '⏳ Simulating partner...'}
+                </div>
+                <div className='text-xs text-[#9fb0cc] mt-1'>Turn #{Math.floor(turnCount / 2) + 1}</div>
+              </div>
+            )}
+
             {/* Session Timer */}
-            {sessionTime !== null && (
+            {sessionTime !== null && sessionTime > 0 && (
               <div className={`text-4xl font-bold mb-4 ${sessionTime <= 5 ? 'text-red-400 animate-pulse' : 'text-yellow-400'}`}>
                 ⏱️ {sessionTime}s
               </div>
             )}
-            {sessionTime === 0 && (
-              <div className='text-xl font-bold text-red-400 mb-4'>Time's up!</div>
+            
+            {/* Game Result Display */}
+            {sessionTime === 0 && gameResult && (
+              <div className='mb-6 p-6 bg-gradient-to-b from-white/10 to-white/5 border border-white/20 rounded-xl'>
+                <div className='text-2xl font-bold text-white mb-4'>
+                  {gameResult.status === 'won' ? '🎉 Congratulations!' : 
+                   gameResult.status === 'great' ? '🌟 Amazing Tower!' :
+                   gameResult.status === 'good' ? '👍 Good Job!' :
+                   gameResult.status === 'failed' ? '😅 Nice Try!' :
+                   '⏰ Time\'s Up!'}
+                </div>
+                
+                <div className='grid grid-cols-2 gap-4 mb-4'>
+                  <div className='bg-white/5 rounded-lg p-3'>
+                    <div className='text-xs text-[#9fb0cc] uppercase'>Tower Height</div>
+                    <div className='text-3xl font-bold text-[#6ea0d6]'>{gameResult.towerHeight}px</div>
+                  </div>
+                  <div className='bg-white/5 rounded-lg p-3'>
+                    <div className='text-xs text-[#9fb0cc] uppercase'>Blocks Placed</div>
+                    <div className='text-3xl font-bold text-[#6ea0d6]'>{gameResult.totalBlocks}</div>
+                  </div>
+                </div>
+                
+                <div className='text-sm text-[#9fb0cc] mb-4'>
+                  Completed in {gameResult.turnsPlayed} turn{gameResult.turnsPlayed !== 1 ? 's' : ''}
+                </div>
+                
+                {gameResult.targetBlocks && (
+                  <div className={`text-sm ${gameResult.status === 'won' ? 'text-green-400' : 'text-yellow-400'}`}>
+                    Target: {gameResult.totalBlocks}/{gameResult.targetBlocks} blocks
+                  </div>
+                )}
+                
+                <button 
+                  className='mt-4 px-6 py-3 text-base font-bold text-white rounded-lg cursor-pointer transition-all duration-150 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500'
+                  onClick={handleBackToHome}
+                >
+                  🏠 Back to Menu
+                </button>
+              </div>
+            )}
+            
+            {sessionTime === 0 && !gameResult && (
+              <div className='text-xl font-bold text-yellow-400 mb-4 animate-pulse'>
+                Calculating results...
+              </div>
             )}
 
-            <div className='flex gap-2 items-center justify-center flex-wrap'>
-              {(() => {
-                const maxBlocks = activeMode.spawner?.max_blocks
-                const remaining = maxBlocks ? maxBlocks - spawnedBlocks : null
-                const isTimeUp = sessionTime === 0
-                const isDisabled = isTimeUp || (maxBlocks && spawnedBlocks >= maxBlocks)
-                return (
-                  <button 
-                    className={`px-4 py-2 text-sm font-medium text-[#e6eef8] rounded-md cursor-pointer transition-all duration-150 ${
-                      isDisabled 
-                        ? 'bg-gray-500/50 cursor-not-allowed' 
-                        : 'bg-[#6D28D9]/80 hover:bg-[#6D28D9]'
-                    }`}
-                    onClick={spawnBlock}
-                    disabled={isDisabled}
-                  >
-                    {isTimeUp ? 'Game Over' : `Spawn Block${remaining !== null ? ` (${remaining})` : ''}`}
-                  </button>
+            {/* Game Controls - hidden when game is over */}
+            {sessionTime !== 0 && (
+              <div className='flex gap-2 items-center justify-center flex-wrap'>
+                {(() => {
+                  const maxBlocks = activeMode.spawner?.max_blocks
+                  const remaining = maxBlocks ? maxBlocks - spawnedBlocks : null
+                  const isTimeUp = sessionTime === 0
+                  const isNotMyTurn = !isMyTurn
+                  const isDisabled = isTimeUp || isNotMyTurn || (maxBlocks && spawnedBlocks >= maxBlocks)
+                  
+                  return (
+                    <>
+                      <button 
+                        className={`px-4 py-2 text-sm font-medium text-[#e6eef8] rounded-md cursor-pointer transition-all duration-150 ${
+                          isDisabled 
+                            ? 'bg-gray-500/50 cursor-not-allowed' 
+                            : 'bg-[#6D28D9]/80 hover:bg-[#6D28D9]'
+                        }`}
+                        onClick={spawnBlock}
+                        disabled={isDisabled}
+                      >
+                        {isTimeUp ? 'Game Over' : isNotMyTurn ? (multiplayerGame ? 'Wait for Partner' : 'Wait...') : `Spawn Block${remaining !== null ? ` (${remaining})` : ''}`}
+                      </button>
+                    
+                    {/* End Turn button - works for both collaborative and training mode */}
+                    {isMyTurn && !isTimeUp && (
+                      <button 
+                        className='px-6 py-3 text-base font-bold text-white rounded-lg cursor-pointer transition-all duration-150 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 shadow-lg hover:shadow-green-500/25 hover:-translate-y-0.5'
+                        onClick={endTurn}
+                      >
+                        ✅ END TURN
+                      </button>
+                    )}
+                  </>
                 )
               })()}
-            </div>
+              </div>
+            )}
 
             <div className='mt-2 text-xs text-[#9fb0cc]'>
               {activeLevel && <span>Level: {activeLevel.name} — {activeLevel.description} </span>}

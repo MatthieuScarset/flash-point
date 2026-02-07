@@ -7,6 +7,8 @@ class MatchmakingService {
     this.socket = null
     this.isConnected = false
     this.currentGameId = null
+    this.playerNumber = null
+    this.isMyTurn = false
     this.eventHandlers = new Map()
   }
 
@@ -40,12 +42,12 @@ class MatchmakingService {
 
         // Game events
         this.socket.on('waiting_for_opponent', (data) => {
-          console.log('⏳ Waiting for opponent:', data)
+          console.log('⏳ Waiting for partner:', data)
           this.emit('waiting', data)
         })
 
         this.socket.on('match_found', (data) => {
-          console.log('🎉 Match found!', data)
+          console.log('🎉 Partner found!', data)
           this.currentGameId = data.gameId
           this.emit('match_found', data)
         })
@@ -53,7 +55,29 @@ class MatchmakingService {
         this.socket.on('game_start', (data) => {
           console.log('🚀 Game starting!', data)
           this.currentGameId = data.gameId
+          this.playerNumber = data.playerNumber
+          this.isMyTurn = data.isYourTurn
           this.emit('game_start', data)
+        })
+
+        // Collaborative mode events
+        this.socket.on('block_spawned', (data) => {
+          console.log('🧱 Block spawned:', data)
+          this.emit('block_spawned', data)
+        })
+
+        this.socket.on('turn_changed', (data) => {
+          console.log('🔄 Turn changed:', data)
+          this.isMyTurn = data.isYourTurn
+          this.emit('turn_changed', data)
+        })
+
+        this.socket.on('block_position_update', (data) => {
+          this.emit('block_position_update', data)
+        })
+
+        this.socket.on('game_state_sync', (data) => {
+          this.emit('game_state_sync', data)
         })
 
         this.socket.on('opponent_score', (data) => {
@@ -61,7 +85,7 @@ class MatchmakingService {
         })
 
         this.socket.on('opponent_disconnected', (data) => {
-          console.log('👋 Opponent disconnected:', data)
+          console.log('👋 Partner disconnected:', data)
           this.emit('opponent_disconnected', data)
         })
 
@@ -73,6 +97,11 @@ class MatchmakingService {
         this.socket.on('left_lobby', (data) => {
           console.log('👋 Left lobby:', data)
           this.emit('left_lobby', data)
+        })
+
+        this.socket.on('error', (data) => {
+          console.error('❌ Game error:', data)
+          this.emit('error', data)
         })
 
         // Timeout after 5 seconds
@@ -89,7 +118,7 @@ class MatchmakingService {
   }
 
   /**
-   * Join lobby to find an opponent
+   * Join lobby to find a partner
    */
   joinLobby(modeId, address, stateChannelProof = null) {
     if (!this.isConnected) {
@@ -109,6 +138,58 @@ class MatchmakingService {
   leaveLobby(modeId) {
     if (this.socket) {
       this.socket.emit('leave_lobby', { modeId })
+    }
+  }
+
+  /**
+   * Spawn a block (collaborative mode)
+   */
+  spawnBlock(block) {
+    if (this.socket && this.currentGameId) {
+      this.socket.emit('spawn_block', {
+        gameId: this.currentGameId,
+        block
+      })
+    }
+  }
+
+  /**
+   * End current turn and send final block states
+   */
+  endTurn(blockStates) {
+    if (this.socket && this.currentGameId) {
+      this.socket.emit('end_turn', {
+        gameId: this.currentGameId,
+        blockStates
+      })
+      this.isMyTurn = false
+    }
+  }
+
+  /**
+   * Sync block position in real-time while dragging
+   */
+  syncBlockPosition(blockId, x, y, angle) {
+    if (this.socket && this.currentGameId && this.isMyTurn) {
+      this.socket.emit('sync_block_position', {
+        gameId: this.currentGameId,
+        blockId,
+        x,
+        y,
+        angle
+      })
+    }
+  }
+
+  /**
+   * Sync full game state
+   */
+  syncGameState(blockStates) {
+    if (this.socket && this.currentGameId && this.isMyTurn) {
+      this.socket.emit('sync_game_state', {
+        gameId: this.currentGameId,
+        blockStates
+      })
     }
   }
 
@@ -146,6 +227,8 @@ class MatchmakingService {
     }
     this.isConnected = false
     this.currentGameId = null
+    this.playerNumber = null
+    this.isMyTurn = false
   }
 
   /**

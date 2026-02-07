@@ -18,7 +18,7 @@ const io = new Server(httpServer, {
 
 // Game state
 const lobbies = new Map() // modeId -> { players: [], createdAt }
-const activeGames = new Map() // gameId -> { player1, player2, modeId, state, bets }
+const activeGames = new Map() // gameId -> { player1, player2, modeId, state, bets, gameState }
 const playerSockets = new Map() // socketId -> { address, gameId, modeId }
 
 // Bet amount in USDC (1 USDC = 1,000,000 units with 6 decimals)
@@ -52,7 +52,7 @@ io.on('connection', (socket) => {
       const opponent = lobby.players.shift()
       const gameId = uuidv4()
       
-      // Create the game
+      // Create the game with shared state
       const game = {
         id: gameId,
         modeId,
@@ -70,7 +70,14 @@ io.on('connection', (socket) => {
         },
         betAmount: BET_AMOUNT,
         status: 'starting',
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        // Shared game state for collaborative mode
+        gameState: {
+          blocks: [], // Array of block states { id, x, y, angle, label }
+          currentTurn: 1, // Player 1 starts
+          turnCount: 0,
+          spawnedBlocks: 0
+        }
       }
       
       activeGames.set(gameId, game)
@@ -96,13 +103,15 @@ io.on('connection', (socket) => {
         betAmount: BET_AMOUNT
       })
       
-      // Send personalized messages
+      // Send personalized messages with initial game state
       io.to(opponent.socketId).emit('game_start', {
         gameId,
         modeId,
         opponent: { address },
         betAmount: BET_AMOUNT,
-        playerNumber: 1
+        playerNumber: 1,
+        isYourTurn: true, // Player 1 starts
+        gameState: game.gameState
       })
       
       socket.emit('game_start', {
@@ -110,7 +119,9 @@ io.on('connection', (socket) => {
         modeId,
         opponent: { address: opponent.address },
         betAmount: BET_AMOUNT,
-        playerNumber: 2
+        playerNumber: 2,
+        isYourTurn: false, // Player 2 waits
+        gameState: game.gameState
       })
       
     } else {
@@ -130,6 +141,106 @@ io.on('connection', (socket) => {
         estimatedWait: '~30 seconds'
       })
     }
+  })
+
+  // Player spawns a block (collaborative mode)
+  socket.on('spawn_block', ({ gameId, block }) => {
+    const game = activeGames.get(gameId)
+    if (!game) return
+    
+    const playerNumber = game.player1.socketId === socket.id ? 1 : 2
+    
+    // Verify it's this player's turn
+    if (game.gameState.currentTurn !== playerNumber) {
+      socket.emit('error', { message: 'Not your turn!' })
+      return
+    }
+    
+    // Add block to game state
+    game.gameState.blocks.push(block)
+    game.gameState.spawnedBlocks++
+    
+    console.log(`🧱 Player ${playerNumber} spawned block in game ${gameId}`)
+    
+    // Broadcast the spawn to both players
+    io.to(gameId).emit('block_spawned', {
+      block,
+      spawnedBy: playerNumber,
+      totalBlocks: game.gameState.spawnedBlocks
+    })
+  })
+
+  // Player finishes their turn (after placing/dragging block)
+  socket.on('end_turn', ({ gameId, blockStates }) => {
+    const game = activeGames.get(gameId)
+    if (!game) return
+    
+    const playerNumber = game.player1.socketId === socket.id ? 1 : 2
+    
+    // Verify it's this player's turn
+    if (game.gameState.currentTurn !== playerNumber) {
+      return
+    }
+    
+    // Update the shared block states
+    game.gameState.blocks = blockStates
+    game.gameState.turnCount++
+    
+    // Switch turns
+    game.gameState.currentTurn = playerNumber === 1 ? 2 : 1
+    
+    console.log(`🔄 Turn ended. Now player ${game.gameState.currentTurn}'s turn in game ${gameId}`)
+    
+    // Notify both players of the turn change and updated state
+    io.to(game.player1.socketId).emit('turn_changed', {
+      currentTurn: game.gameState.currentTurn,
+      isYourTurn: game.gameState.currentTurn === 1,
+      blockStates,
+      turnCount: game.gameState.turnCount
+    })
+    
+    io.to(game.player2.socketId).emit('turn_changed', {
+      currentTurn: game.gameState.currentTurn,
+      isYourTurn: game.gameState.currentTurn === 2,
+      blockStates,
+      turnCount: game.gameState.turnCount
+    })
+  })
+
+  // Real-time block position sync (while dragging)
+  socket.on('sync_block_position', ({ gameId, blockId, x, y, angle }) => {
+    const game = activeGames.get(gameId)
+    if (!game) return
+    
+    // Broadcast to the other player only
+    socket.to(gameId).emit('block_position_update', {
+      blockId,
+      x,
+      y,
+      angle
+    })
+  })
+
+  // Sync all block states periodically
+  socket.on('sync_game_state', ({ gameId, blockStates }) => {
+    const game = activeGames.get(gameId)
+    if (!game) return
+    
+    const playerNumber = game.player1.socketId === socket.id ? 1 : 2
+    
+    // Only the current turn player can sync state
+    if (game.gameState.currentTurn !== playerNumber) {
+      return
+    }
+    
+    // Update game state
+    game.gameState.blocks = blockStates
+    
+    // Broadcast to the other player
+    socket.to(gameId).emit('game_state_sync', {
+      blockStates,
+      fromPlayer: playerNumber
+    })
   })
 
   // Player leaves lobby
