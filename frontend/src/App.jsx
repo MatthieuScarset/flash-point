@@ -687,11 +687,16 @@ function App() {
 
   // End turn - works for both collaborative and training mode
   const endTurn = () => {
-    if (!isMyTurn) return
+    console.log('🔄 endTurn called', { isMyTurn, multiplayerGame, gameId: matchmaking.currentGameId })
+    if (!isMyTurn) {
+      console.log('❌ Not my turn, returning')
+      return
+    }
     
     if (multiplayerGame) {
       // Collaborative mode: send to server and wait for partner
       const blockStates = getBlockStates()
+      console.log('📤 Sending end_turn to server', { blockStates, gameId: matchmaking.currentGameId })
       matchmaking.endTurn(blockStates)
       setIsMyTurn(false)
     } else {

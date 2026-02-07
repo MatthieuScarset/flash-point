@@ -13,6 +13,8 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
   
   // Use ref to avoid stale closure and prevent re-running effect when callback changes
   const onGameStartRef = useRef(onGameStart)
+  const gameStartedRef = useRef(false)
+  
   useEffect(() => {
     onGameStartRef.current = onGameStart
   }, [onGameStart])
@@ -53,6 +55,7 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
           if (!mounted) return
           setOpponent(data.opponent)
           setGameData(data)
+          gameStartedRef.current = true // Mark that game has started
           
           // Countdown before game starts
           setCountdown(3)
@@ -88,8 +91,12 @@ function GameLobby({ modeId, modeName, onGameStart, onCancel }) {
 
     return () => {
       mounted = false
-      matchmaking.leaveLobby(modeId)
-      matchmaking.disconnect()
+      // Only cleanup if we haven't started a game
+      // The game screen will handle its own cleanup when done
+      if (!gameStartedRef.current) {
+        matchmaking.leaveLobby(modeId)
+        matchmaking.disconnect()
+      }
     }
   }, [modeId, address])
 

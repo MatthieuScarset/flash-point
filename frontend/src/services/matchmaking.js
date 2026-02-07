@@ -157,12 +157,21 @@ class MatchmakingService {
    * End current turn and send final block states
    */
   endTurn(blockStates) {
+    console.log('📤 matchmaking.endTurn called', { 
+      hasSocket: !!this.socket, 
+      currentGameId: this.currentGameId,
+      isConnected: this.isConnected,
+      blockStatesLength: blockStates?.length 
+    })
     if (this.socket && this.currentGameId) {
+      console.log('📤 Emitting end_turn event')
       this.socket.emit('end_turn', {
         gameId: this.currentGameId,
         blockStates
       })
       this.isMyTurn = false
+    } else {
+      console.log('❌ Cannot emit end_turn: socket or gameId missing')
     }
   }
 

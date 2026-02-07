@@ -172,13 +172,19 @@ io.on('connection', (socket) => {
 
   // Player finishes their turn (after placing/dragging block)
   socket.on('end_turn', ({ gameId, blockStates }) => {
+    console.log(`📥 end_turn received from ${socket.id}`, { gameId, blockStatesLength: blockStates?.length })
     const game = activeGames.get(gameId)
-    if (!game) return
+    if (!game) {
+      console.log(`❌ Game ${gameId} not found`)
+      return
+    }
     
     const playerNumber = game.player1.socketId === socket.id ? 1 : 2
+    console.log(`Player ${playerNumber} ending turn. Current turn: ${game.gameState.currentTurn}`)
     
     // Verify it's this player's turn
     if (game.gameState.currentTurn !== playerNumber) {
+      console.log(`❌ Not player ${playerNumber}'s turn`)
       return
     }
     
@@ -192,19 +198,26 @@ io.on('connection', (socket) => {
     console.log(`🔄 Turn ended. Now player ${game.gameState.currentTurn}'s turn in game ${gameId}`)
     
     // Notify both players of the turn change and updated state
-    io.to(game.player1.socketId).emit('turn_changed', {
-      currentTurn: game.gameState.currentTurn,
-      isYourTurn: game.gameState.currentTurn === 1,
-      blockStates,
-      turnCount: game.gameState.turnCount
-    })
+    const player1Socket = io.sockets.sockets.get(game.player1.socketId)
+    const player2Socket = io.sockets.sockets.get(game.player2.socketId)
     
-    io.to(game.player2.socketId).emit('turn_changed', {
-      currentTurn: game.gameState.currentTurn,
-      isYourTurn: game.gameState.currentTurn === 2,
-      blockStates,
-      turnCount: game.gameState.turnCount
-    })
+    if (player1Socket) {
+      player1Socket.emit('turn_changed', {
+        currentTurn: game.gameState.currentTurn,
+        isYourTurn: game.gameState.currentTurn === 1,
+        blockStates,
+        turnCount: game.gameState.turnCount
+      })
+    }
+    
+    if (player2Socket) {
+      player2Socket.emit('turn_changed', {
+        currentTurn: game.gameState.currentTurn,
+        isYourTurn: game.gameState.currentTurn === 2,
+        blockStates,
+        turnCount: game.gameState.turnCount
+      })
+    }
   })
 
   // Real-time block position sync (while dragging)

@@ -35,7 +35,7 @@ match_config:
     base_friction: 0.3
   rules:
     win_condition: "max_height_at_timer"
-    session_duration: 180
+    session_duration: 60
   payouts:
     distribution: "skill_proportional"
     loser_rebate: 0.10
