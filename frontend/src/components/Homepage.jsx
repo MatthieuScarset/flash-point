@@ -32,7 +32,7 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
       ensGameHistory.getENSName(address).then(name => {
         if (name) {
           setEnsName(name)
-          console.log('📛 ENS name found:', name)
+          console.log('😜 ENS name found:', name)
           
           // Load game history from ENS
           setLoadingHistory(true)
@@ -160,7 +160,7 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
           <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-[#e6eef8] flex items-center gap-2">
-                📛 Your Profile
+                😜 Your Profile
               </h3>
               {ensName ? (
                 <a

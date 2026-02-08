@@ -48,7 +48,7 @@ function GameSettlement({
       ensGameHistory.getENSName(address).then(name => {
         if (name) {
           setEnsName(name)
-          console.log('📛 ENS name found:', name)
+          console.log('😜 ENS name found:', name)
         }
       })
     }
