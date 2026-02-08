@@ -23,16 +23,49 @@ import {
   createAuthVerifyMessage,
   parseAuthChallengeResponse,
   createEIP712AuthMessageSigner,
+  // Session key signing
+  createECDSAMessageSigner,
 } from '@erc7824/nitrolite'
 import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts'
 
 // ClearNode WebSocket endpoints
-// Based on https://github.com/erc7824/nitrolite documentation
-const CLEARNODE_TEST = 'wss://clearnet-sandbox.yellow.com/ws'
-const CLEARNODE_PROD = 'wss://clearnet.yellow.com/ws'
+// Based on https://docs.yellow.org/docs/learn/introduction/supported-chains
+const CLEARNODE_SANDBOX = 'wss://clearnet-sandbox.yellow.com/ws' // For testing with ytest.usd
+const CLEARNODE_PROD = 'wss://clearnet.yellow.com/ws'           // For real assets (usdc)
 
-// Use TEST by default, can override via environment variable
-const CLEARNODE_URL = import.meta.env.VITE_CLEARNODE_URL || CLEARNODE_TEST
+// Use SANDBOX by default for testing (uses testnet tokens like ytest.usd)
+// Set VITE_CLEARNODE_URL in .env to override
+const CLEARNODE_URL = import.meta.env.VITE_CLEARNODE_URL || CLEARNODE_SANDBOX
+
+console.log('🌐 Nitrolite ClearNode URL:', CLEARNODE_URL)
+
+// Yellow Network Contract Addresses
+// See: https://docs.yellow.org/docs/learn/introduction/supported-chains
+export const YELLOW_CONTRACTS = {
+  // Sandbox (Testnet) - Same addresses across all sandbox chains
+  sandbox: {
+    custody: '0x019B65A265EB3363822f2752141b3dF16131b262',
+    adjudicator: '0x7c7ccbc98469190849BCC6c926307794fDfB11F2',
+  },
+  // Per-chain token addresses (for sandbox, all use ytest.usd)
+  tokens: {
+    // Sepolia ETH (11155111)
+    11155111: {
+      'ytest.usd': '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // Test USD token
+    },
+    // Base Sepolia (84532)  
+    84532: {
+      'ytest.usd': '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    },
+    // Polygon Amoy (80002)
+    80002: {
+      'ytest.usd': '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238',
+    },
+  },
+}
+
+// Determine environment from URL
+export const IS_SANDBOX = CLEARNODE_URL.includes('sandbox')
 
 // Protocol version for FlashPoint game
 const FLASHPOINT_PROTOCOL = 'NitroRPC/0.4'
@@ -41,6 +74,9 @@ const FLASHPOINT_PROTOCOL = 'NitroRPC/0.4'
 // 1 USDC = 1000000
 export const DEFAULT_ENTRY_FEE = '1000000' // 1 USDC
 export const DEFAULT_BET_AMOUNT = DEFAULT_ENTRY_FEE // Alias for compatibility
+
+// Asset name depends on environment
+export const ASSET_NAME = IS_SANDBOX ? 'ytest.usd' : 'usdc'
 
 // Performance-based reward tiers for collaborative gameplay
 // Players earn bonuses based on tower height achieved together
@@ -87,6 +123,9 @@ class NitroliteClient {
     this.ws = null
     this.isConnected = false
     this.signer = null
+    this.sessionSigner = null // ECDSA signer from session key (for app sessions)
+    this.sessionKey = null
+    this.sessionAccount = null
     this.userAddress = null
     this.appSessionId = null
     this.pendingRequests = new Map()
@@ -204,13 +243,16 @@ class NitroliteClient {
     console.log('   Session Key:', sessionAccount.address)
 
     // Auth request parameters - following SDK format exactly
+    // Allowances define the spending cap for the session key
     const authRequestParams = {
       address: address,
       session_key: sessionAccount.address,
-      application: 'flashpoint-game',  // Use app name
+      application: 'FlashPoint',  // Must match app session application name
       expires_at: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour expiration
       scope: 'console',
-      allowances: [],
+      allowances: [
+        { asset: ASSET_NAME, amount: '1000000000' }, // Allow up to 1000 USDC/ytest.usd
+      ],
     }
 
     // Create EIP712 message signer for auth_verify
@@ -262,6 +304,11 @@ class NitroliteClient {
       // Ignore parse errors, authentication may still have succeeded
       console.log('⚠️ Could not parse JWT from response, continuing...')
     }
+    
+    // Create session key signer for app session operations
+    // This is the signer that should be used for createAppSessionMessage, etc.
+    this.sessionSigner = createECDSAMessageSigner(this.sessionKey)
+    console.log('🔐 Session signer created for:', this.sessionAccount.address)
     
     console.log('✅ Authentication complete!')
   }
@@ -432,8 +479,8 @@ class NitroliteClient {
    * @returns {Promise<Object>} App session details
    */
   async createGameSession(opponentAddress, betAmount = DEFAULT_BET_AMOUNT) {
-    if (!this.signer || !this.userAddress) {
-      throw new Error('Client not initialized. Call initialize() first.')
+    if (!this.sessionSigner || !this.userAddress) {
+      throw new Error('Client not authenticated. Call connect() with wallet first.')
     }
 
     // Define the application session parameters
@@ -451,19 +498,19 @@ class NitroliteClient {
     const allocations = [
       {
         participant: this.userAddress,
-        asset: 'usdc',
+        asset: ASSET_NAME, // 'ytest.usd' for sandbox, 'usdc' for production
         amount: betAmount,
       },
       {
         participant: opponentAddress,
-        asset: 'usdc',
+        asset: ASSET_NAME,
         amount: betAmount,
       },
     ]
 
-    // Create the signed message
+    // Create the signed message using SESSION KEY signer
     const signedMessage = await createAppSessionMessage(
-      this.signer,
+      this.sessionSigner,
       {
         definition: appDefinition,
         allocations,
@@ -473,12 +520,173 @@ class NitroliteClient {
     // Send and wait for response
     const response = await this.sendAndWait(signedMessage)
     
-    if (response.params?.appSessionId) {
-      this.appSessionId = response.params.appSessionId
+    console.log('📨 createGameSession response:', JSON.stringify(response, null, 2))
+    
+    if (response?.appSessionId) {
+      this.appSessionId = response.appSessionId
       console.log('🎮 Game session created:', this.appSessionId)
+    } else if (response?.params?.appSessionId) {
+      this.appSessionId = response.params.appSessionId
+      console.log('🎮 Game session created (from params):', this.appSessionId)
+    } else if (response?.error) {
+      console.error('❌ ClearNode error:', response.error)
+      console.error('   This usually means you need to deposit funds first.')
+      console.error('   Run: curl -XPOST https://clearnet-sandbox.yellow.com/faucet/requestTokens -H "Content-Type: application/json" -d \'{"userAddress":"' + this.userAddress + '"}\'')
     }
 
-    return response.params
+    return response?.params || response
+  }
+
+  /**
+   * Create a session proposal for multi-party signing
+   * Player 1 calls this to create the proposal, then sends to Player 2 for signing
+   * 
+   * @param {string} opponentAddress - Opponent's wallet address
+   * @param {string} betAmount - Bet amount in USDC (6 decimals)
+   * @returns {Promise<Object>} Session proposal with Player 1's signature
+   */
+  async createSessionProposal(opponentAddress, betAmount = DEFAULT_BET_AMOUNT) {
+    if (!this.sessionSigner || !this.userAddress) {
+      throw new Error('Client not authenticated. Call connect() with wallet first.')
+    }
+
+    // Define the application session parameters
+    const appDefinition = {
+      protocol: FLASHPOINT_PROTOCOL,
+      application: 'FlashPoint',
+      participants: [this.userAddress, opponentAddress],
+      weights: [50, 50],
+      quorum: 100,
+      challenge: 0,
+      nonce: Date.now(),
+    }
+
+    // Initial allocations
+    const allocations = [
+      {
+        participant: this.userAddress,
+        asset: ASSET_NAME,
+        amount: betAmount,
+      },
+      {
+        participant: opponentAddress,
+        asset: ASSET_NAME,
+        amount: betAmount,
+      },
+    ]
+
+    // Create the signed message using SESSION KEY signer (not wallet signer)
+    const signedMessage = await createAppSessionMessage(
+      this.sessionSigner,
+      {
+        definition: appDefinition,
+        allocations,
+      }
+    )
+
+    // Parse to get the message object
+    const messageObj = JSON.parse(signedMessage)
+    
+    console.log('📝 Session proposal created:', messageObj)
+    
+    return {
+      message: messageObj,      // The full message object { req, sig }
+      request: messageObj.req,  // Just the request data for co-signing
+      signature: messageObj.sig[0], // Player 1's signature
+    }
+  }
+
+  /**
+   * Co-sign a session proposal (called by Player 2)
+   * 
+   * @param {Array} requestData - The req array from the proposal
+   * @returns {Promise<string>} Player 2's signature
+   */
+  async signSessionProposal(requestData) {
+    if (!this.sessionSigner) {
+      throw new Error('Client not authenticated. Call connect() with wallet first.')
+    }
+
+    console.log('✍️ Co-signing session proposal with session key...')
+    
+    // Sign the request data using SESSION KEY signer
+    const signature = await this.sessionSigner(requestData)
+    
+    console.log('✅ Session proposal signed')
+    return signature
+  }
+
+  /**
+   * Submit a multi-signed session to ClearNode
+   * Called by Player 1 after collecting Player 2's signature
+   * 
+   * @param {Object} message - The original message object { req, sig }
+   * @param {string} coSignature - Player 2's signature to append
+   * @returns {Promise<Object>} App session details
+   */
+  async submitMultiSignedSession(message, coSignature) {
+    if (!this.isConnected || this.ws?.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected to ClearNode')
+    }
+
+    // Append the co-signer's signature
+    message.sig.push(coSignature)
+    
+    console.log('📤 Submitting multi-signed session:', message)
+    
+    // Send and wait for response
+    const messageStr = JSON.stringify(message)
+    const response = await this.sendAndWait(messageStr)
+    
+    console.log('📨 Multi-signed session RAW response:', response)
+    console.log('📨 Response.raw:', response?.raw)
+    console.log('📨 Response.params:', response?.params)
+    console.log('📨 Response.method:', response?.method)
+    
+    // Try to parse using SDK helper
+    try {
+      if (response?.raw) {
+        const rawStr = JSON.stringify(response.raw)
+        const parsed = parseCreateAppSessionResponse(rawStr)
+        console.log('📨 SDK parsed response:', parsed)
+        if (parsed?.appSessionId) {
+          this.appSessionId = parsed.appSessionId
+          console.log('🎮 Game session created (SDK parsed):', this.appSessionId)
+          return parsed
+        }
+      }
+    } catch (parseErr) {
+      console.warn('⚠️ SDK parse failed:', parseErr.message)
+    }
+    
+    // Check for error in response
+    if (response?.raw?.err) {
+      const [reqId, errCode, errMsg] = response.raw.err
+      console.error('❌ ClearNode error:', errCode, errMsg)
+      throw new Error(`${errCode}: ${errMsg}`)
+    }
+    
+    // Try direct property access
+    if (response?.appSessionId) {
+      this.appSessionId = response.appSessionId
+      console.log('🎮 Game session created:', this.appSessionId)
+      return { appSessionId: this.appSessionId, ...response }
+    } else if (response?.params?.appSessionId) {
+      this.appSessionId = response.params.appSessionId
+      console.log('🎮 Game session created (from params):', this.appSessionId)
+      return { appSessionId: this.appSessionId, ...response.params }
+    } else if (response?.params?.app_session_id) {
+      this.appSessionId = response.params.app_session_id
+      console.log('🎮 Game session created (from params.app_session_id):', this.appSessionId)
+      // Return with camelCase key so GameLobby can find it!
+      return { appSessionId: this.appSessionId, ...response.params }
+    } else if (response?.error || response?.params?.error) {
+      const error = response.error || response.params?.error
+      console.error('❌ ClearNode error:', error)
+      throw new Error(error)
+    }
+
+    return response?.params || response
   }
 
   /**
@@ -524,19 +732,19 @@ class NitroliteClient {
     const allocations = [
       {
         participant: player1Address,
-        asset: 'usdc',
+        asset: ASSET_NAME, // 'ytest.usd' for sandbox, 'usdc' for production
         amount: player1Payout.toString(),
       },
       {
         participant: player2Address,
-        asset: 'usdc',
+        asset: ASSET_NAME,
         amount: player2Payout.toString(),
       },
     ]
 
-    // Create the signed close message
+    // Create the signed close message using SESSION KEY signer
     const signedMessage = await createCloseAppSessionMessage(
-      this.signer,
+      this.sessionSigner,
       {
         app_session_id: this.appSessionId,
         allocations,
@@ -578,7 +786,7 @@ class NitroliteClient {
    * @returns {Promise<Object>}
    */
   async submitGameState(gameState) {
-    if (!this.appSessionId || !this.signer) {
+    if (!this.appSessionId || !this.sessionSigner) {
       throw new Error('No active game session')
     }
 
@@ -586,7 +794,7 @@ class NitroliteClient {
     const { createSubmitAppStateMessage } = await import('@erc7824/nitrolite')
 
     const signedMessage = await createSubmitAppStateMessage(
-      this.signer,
+      this.sessionSigner,
       {
         app_session_id: this.appSessionId,
         session_data: JSON.stringify(gameState),
@@ -647,11 +855,11 @@ class NitroliteClient {
   }
 
   /**
-   * Check if connected
+   * Check if connected and authenticated (ready for app sessions)
    * @returns {boolean}
    */
   isReady() {
-    return this.isConnected && this.signer !== null
+    return this.isConnected && this.sessionSigner !== null
   }
 
   /**
@@ -664,6 +872,9 @@ class NitroliteClient {
     }
     this.isConnected = false
     this.appSessionId = null
+    this.sessionSigner = null
+    this.sessionKey = null
+    this.sessionAccount = null
     console.log('🔌 Disconnected from ClearNode')
   }
 }

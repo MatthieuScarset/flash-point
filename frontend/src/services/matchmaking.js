@@ -99,6 +99,22 @@ class MatchmakingService {
           this.emit('left_lobby', data)
         })
 
+        // State channel multi-party signing events
+        this.socket.on('session_proposal_received', (data) => {
+          console.log('📝 Session proposal received:', data)
+          this.emit('session_proposal_received', data)
+        })
+
+        this.socket.on('session_signature_received', (data) => {
+          console.log('✍️ Session signature received:', data)
+          this.emit('session_signature_received', data)
+        })
+
+        this.socket.on('session_ready', (data) => {
+          console.log('✅ Session ready:', data)
+          this.emit('session_ready', data)
+        })
+
         this.socket.on('error', (data) => {
           console.error('❌ Game error:', data)
           this.emit('error', data)
@@ -222,6 +238,50 @@ class MatchmakingService {
       this.socket.emit('game_end', {
         gameId: this.currentGameId,
         finalScore
+      })
+    }
+  }
+
+  // ===== State Channel Multi-Party Signing =====
+
+  /**
+   * Send session proposal to opponent for co-signing
+   * @param {Object} proposal - The session proposal { message, request, signature }
+   */
+  sendSessionProposal(proposal) {
+    if (this.socket && this.currentGameId) {
+      console.log('📤 Sending session proposal to opponent')
+      this.socket.emit('session_proposal', {
+        gameId: this.currentGameId,
+        proposal
+      })
+    }
+  }
+
+  /**
+   * Send session signature back to proposer
+   * @param {string} signature - Player 2's signature
+   */
+  sendSessionSignature(signature) {
+    if (this.socket && this.currentGameId) {
+      console.log('📤 Sending session signature to proposer')
+      this.socket.emit('session_signature', {
+        gameId: this.currentGameId,
+        signature
+      })
+    }
+  }
+
+  /**
+   * Broadcast session creation success
+   * @param {string} sessionId - The created session ID
+   */
+  broadcastSessionCreated(sessionId) {
+    if (this.socket && this.currentGameId) {
+      console.log('📤 Broadcasting session created:', sessionId)
+      this.socket.emit('session_created', {
+        gameId: this.currentGameId,
+        sessionId
       })
     }
   }

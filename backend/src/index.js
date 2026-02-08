@@ -256,6 +256,65 @@ io.on('connection', (socket) => {
     })
   })
 
+  // ===== State Channel Multi-Party Signing =====
+  
+  // Player 1 sends session proposal to Player 2 for co-signing
+  socket.on('session_proposal', ({ gameId, proposal }) => {
+    const game = activeGames.get(gameId)
+    if (!game) {
+      console.log(`❌ session_proposal: Game ${gameId} not found`)
+      return
+    }
+    
+    const playerNumber = game.player1.socketId === socket.id ? 1 : 2
+    console.log(`📝 Player ${playerNumber} sending session proposal in game ${gameId}`)
+    
+    // Store proposal on game for tracking
+    game.sessionProposal = proposal
+    game.sessionProposer = playerNumber
+    
+    // Forward to the other player
+    socket.to(gameId).emit('session_proposal_received', {
+      proposal,
+      fromPlayer: playerNumber
+    })
+  })
+
+  // Player 2 sends their signature back to Player 1
+  socket.on('session_signature', ({ gameId, signature }) => {
+    const game = activeGames.get(gameId)
+    if (!game) {
+      console.log(`❌ session_signature: Game ${gameId} not found`)
+      return
+    }
+    
+    const playerNumber = game.player1.socketId === socket.id ? 1 : 2
+    console.log(`✍️ Player ${playerNumber} sending session signature in game ${gameId}`)
+    
+    // Forward signature to the proposer (the other player)
+    socket.to(gameId).emit('session_signature_received', {
+      signature,
+      fromPlayer: playerNumber
+    })
+  })
+
+  // Session creation result broadcast
+  socket.on('session_created', ({ gameId, sessionId }) => {
+    const game = activeGames.get(gameId)
+    if (!game) return
+    
+    console.log(`✅ Session ${sessionId} created for game ${gameId}`)
+    game.stateChannelSessionId = sessionId
+    
+    // Notify both players
+    io.to(gameId).emit('session_ready', {
+      sessionId,
+      gameId
+    })
+  })
+
+  // ===== End State Channel Signing =====
+
   // Player leaves lobby
   socket.on('leave_lobby', ({ modeId }) => {
     const playerInfo = playerSockets.get(socket.id)

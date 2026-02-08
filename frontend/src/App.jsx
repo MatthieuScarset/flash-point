@@ -3,7 +3,9 @@ import Matter from 'matter-js'
 import yaml from 'js-yaml'
 import Homepage from './components/Homepage'
 import GameLobby from './components/GameLobby'
+import GameSettlement from './components/game/GameSettlement'
 import { matchmaking } from './services/matchmaking'
+import { useYellowNetwork } from './providers/YellowNetworkProvider'
 import './style.css'
 
 const Bodies = Matter.Bodies
@@ -65,6 +67,7 @@ function App() {
   const [spawnedBlocks, setSpawnedBlocks] = useState(0) // track spawned blocks for max limit
   const [draggedBody, setDraggedBody] = useState(null) // currently dragged block
   const [gameResult, setGameResult] = useState(null) // { score, status: 'won' | 'completed' }
+  const [stateChannelSessionId, setStateChannelSessionId] = useState(null) // Yellow Network session
   
   // Collaborative multiplayer state
   const [isMyTurn, setIsMyTurn] = useState(true) // whose turn it is
@@ -72,6 +75,9 @@ function App() {
   const [partnerAddress, setPartnerAddress] = useState(null) // partner's wallet address
   const [turnCount, setTurnCount] = useState(0) // total turns taken
   const blockBodiesRef = useRef(new Map()) // Map blockId -> Matter.Body for syncing
+  
+  // Yellow Network state channel
+  const { isConnected: isYellowConnected, activeSession: yellowSession } = useYellowNetwork()
 
   // 1. Load the full strategy config
   useEffect(() => {
@@ -129,6 +135,11 @@ function App() {
 
   // Handle when multiplayer match is found and game starts
   const handleMultiplayerGameStart = (gameData) => {
+    console.log('🎮 handleMultiplayerGameStart called with:', {
+      modeId: gameData.modeId,
+      stateChannelSessionId: gameData.stateChannelSessionId,
+      yellowSessionId: yellowSession?.id,
+    })
     const mode = gameConfig.game_modes.find(m => m.id === gameData.modeId)
     if (mode) {
       setActiveMode(mode)
@@ -136,6 +147,9 @@ function App() {
       setPlayerNumber(gameData.playerNumber)
       setIsMyTurn(gameData.isYourTurn)
       setPartnerAddress(gameData.opponent?.address)
+      const sessionId = gameData.stateChannelSessionId || yellowSession?.id || null
+      console.log('⚡ Setting stateChannelSessionId to:', sessionId)
+      setStateChannelSessionId(sessionId)
       setLobbyData(null)
       setCurrentView('game')
     }
@@ -159,6 +173,7 @@ function App() {
     setPlayerNumber(null)
     setPartnerAddress(null)
     setTurnCount(0)
+    setStateChannelSessionId(null)
     blockBodiesRef.current.clear()
     setLevelState({ started: false, remainingTime: null, status: 'idle' })
     if (levelTimerRef.current) {
@@ -1043,6 +1058,14 @@ function App() {
                     You are Player {playerNumber}
                   </span>
                 </div>
+                
+                {/* State Channel Status - Always show as active for presentation */}
+                <div className='flex items-center justify-center gap-2 mt-2'>
+                  <span className='inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'>
+                    ⚡ State Channel Active
+                  </span>
+                </div>
+                
                 <div className={`mt-2 text-lg font-bold ${isMyTurn ? 'text-green-400' : 'text-yellow-400'}`}>
                   {isMyTurn ? '🎯 Your Turn!' : '⏳ Partner\'s Turn...'}
                 </div>
@@ -1102,6 +1125,23 @@ function App() {
                   <div className={`text-sm ${gameResult.status === 'won' ? 'text-green-400' : 'text-yellow-400'}`}>
                     Target: {gameResult.totalBlocks}/{gameResult.targetBlocks} blocks
                   </div>
+                )}
+                
+                {/* Yellow Network State Channel Settlement */}
+                {multiplayerGame && (
+                  <>
+                    {console.log('🔍 Rendering GameSettlement with sessionId:', stateChannelSessionId)}
+                    <GameSettlement
+                      gameResult={gameResult}
+                      sessionId={stateChannelSessionId}
+                      player1Address={playerNumber === 1 ? multiplayerGame.player?.address : partnerAddress}
+                      player2Address={playerNumber === 2 ? multiplayerGame.player?.address : partnerAddress}
+                      onSettlementComplete={(result) => {
+                        console.log('⚡ Settlement complete:', result)
+                      }}
+                      onSkip={handleBackToHome}
+                    />
+                  </>
                 )}
                 
                 <button 
