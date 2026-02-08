@@ -178,11 +178,11 @@ class MatchmakingService {
   /**
    * Sync block position in real-time while dragging
    */
-  syncBlockPosition(blockId, x, y, angle) {
+  syncBlockPosition(syncId, x, y, angle) {
     if (this.socket && this.currentGameId && this.isMyTurn) {
       this.socket.emit('sync_block_position', {
         gameId: this.currentGameId,
-        blockId,
+        syncId,
         x,
         y,
         angle

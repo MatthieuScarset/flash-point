@@ -221,13 +221,13 @@ io.on('connection', (socket) => {
   })
 
   // Real-time block position sync (while dragging)
-  socket.on('sync_block_position', ({ gameId, blockId, x, y, angle }) => {
+  socket.on('sync_block_position', ({ gameId, syncId, x, y, angle }) => {
     const game = activeGames.get(gameId)
     if (!game) return
     
     // Broadcast to the other player only
     socket.to(gameId).emit('block_position_update', {
-      blockId,
+      syncId,
       x,
       y,
       angle

@@ -13,7 +13,12 @@ const BLOCK_DEFAULT_RADIUS = 18
 const BLOCK_DEFAULT_WIDTH = 32
 const BLOCK_DEFAULT_HEIGHT = 32
 
-const createBlock = (blockConfig, position) => {
+// Generate a unique sync ID for multiplayer block synchronization
+const generateSyncId = () => {
+  return `block_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+const createBlock = (blockConfig, position, syncId = null) => {
   const { x, y } = position
   const commonProperties = {
     friction: blockConfig.friction,
@@ -35,6 +40,8 @@ const createBlock = (blockConfig, position) => {
 
   // Tag the body with a block id/label (used for level checks)
   body.label = blockConfig.label || blockConfig.shape
+  // Add custom sync ID for multiplayer synchronization
+  body.syncId = syncId || generateSyncId()
   return body
 }
 
@@ -241,6 +248,63 @@ function App() {
 
     setRenderSize(size.width, size.height)
 
+    // Height goal lines configuration (tower height thresholds for rewards)
+    const heightGoals = [
+      { height: 100, color: '#C0C0C0', label: '100px - Great (1.2x)', dashPattern: [8, 4] },
+      { height: 200, color: '#FFD700', label: '200px - Epic (1.5x)', dashPattern: [12, 4] },
+      { height: 300, color: '#FF6B6B', label: '300px - Legendary (2x)', dashPattern: [16, 4] },
+    ]
+
+    // Draw height goal lines after each render frame
+    const drawHeightGoals = () => {
+      const ctx = render.context
+      const { width, height } = render.options
+      const groundH = Math.max(20, Math.round(height * 0.06))
+      const groundY = height - groundH
+
+      ctx.save()
+      ctx.font = '10px Inter, system-ui, sans-serif'
+      ctx.textAlign = 'right'
+
+      heightGoals.forEach(goal => {
+        const lineY = groundY - goal.height
+
+        // Only draw if the line is visible (above 0)
+        if (lineY > 0) {
+          // Draw dashed line
+          ctx.beginPath()
+          ctx.setLineDash(goal.dashPattern)
+          ctx.strokeStyle = goal.color
+          ctx.lineWidth = 1.5
+          ctx.globalAlpha = 0.6
+          ctx.moveTo(0, lineY)
+          ctx.lineTo(width, lineY)
+          ctx.stroke()
+          ctx.setLineDash([])
+
+          // Draw label background
+          const labelText = goal.label
+          const textMetrics = ctx.measureText(labelText)
+          const padding = 4
+          const labelWidth = textMetrics.width + padding * 2
+          const labelHeight = 14
+
+          ctx.globalAlpha = 0.8
+          ctx.fillStyle = '#0a1020'
+          ctx.fillRect(width - labelWidth - 4, lineY - labelHeight / 2 - 1, labelWidth, labelHeight)
+
+          // Draw label text
+          ctx.globalAlpha = 1
+          ctx.fillStyle = goal.color
+          ctx.fillText(labelText, width - 6, lineY + 3)
+        }
+      })
+
+      ctx.restore()
+    }
+
+    Matter.Events.on(render, 'afterRender', drawHeightGoals)
+
     Render.run(render)
     const runner = Runner.create()
     Runner.run(runner, engine)
@@ -331,11 +395,13 @@ function App() {
         return { x, y }
       }
 
-      startCondition.forEach(startBlock => {
+      startCondition.forEach((startBlock, index) => {
         const blockConfig = gameConfig.block_library[startBlock.block_id];
         if (blockConfig && startBlock.position) {
           const position = resolvePosition(startBlock.position)
-          const block = createBlock(blockConfig, position);
+          // Use deterministic syncId for start blocks so both players have matching IDs
+          const startSyncId = `start_block_${index}_${startBlock.block_id}`
+          const block = createBlock(blockConfig, position, startSyncId);
           Composite.add(world, block);
         }
       });
@@ -346,6 +412,7 @@ function App() {
       window.removeEventListener('resize', handleResize)
       Matter.Events.off(mouseConstraint, 'startdrag', onStartDrag)
       Matter.Events.off(mouseConstraint, 'enddrag', onEndDrag)
+      Matter.Events.off(render, 'afterRender', drawHeightGoals)
       Render.stop(render)
       Runner.stop(runner)
       Composite.clear(world, false)
@@ -486,9 +553,9 @@ function App() {
     const world = engineRef.current.world
     const bodies = Composite.allBodies(world)
     return bodies
-      .filter(b => !b.isStatic)
+      .filter(b => !b.isStatic && b.syncId) // Only sync blocks with syncId
       .map(b => ({
-        id: b.id,
+        syncId: b.syncId,
         label: b.label,
         x: b.position.x,
         y: b.position.y,
@@ -500,21 +567,39 @@ function App() {
 
   // Helper to apply block states from partner
   const applyBlockStates = useCallback((blockStates) => {
-    if (!engineRef.current) return
+    if (!engineRef.current || !gameConfig) return
     const world = engineRef.current.world
     const bodies = Composite.allBodies(world)
     
+    console.log(`📥 Applying ${blockStates.length} block states from partner`)
+    
     blockStates.forEach(state => {
-      const body = bodies.find(b => b.id === state.id)
-      if (body && !body.isStatic) {
-        Matter.Body.setPosition(body, { x: state.x, y: state.y })
-        Matter.Body.setAngle(body, state.angle)
-        if (state.velocityX !== undefined) {
-          Matter.Body.setVelocity(body, { x: state.velocityX, y: state.velocityY })
+      // Find block by syncId instead of Matter.js id
+      let body = bodies.find(b => b.syncId === state.syncId)
+      
+      // If block doesn't exist locally, create it
+      if (!body && state.label && gameConfig.block_library) {
+        const blockConfig = gameConfig.block_library[state.label]
+        if (blockConfig) {
+          body = createBlock(blockConfig, { x: state.x, y: state.y }, state.syncId)
+          Composite.add(world, body)
+          console.log(`🧱 Created missing block with syncId: ${state.syncId}`)
         }
       }
+      
+      if (body && !body.isStatic) {
+        // Set position, angle, and velocity to match partner's state
+        Matter.Body.setPosition(body, { x: state.x, y: state.y })
+        Matter.Body.setAngle(body, state.angle)
+        // Set velocity to 0 to stop movement and let physics settle
+        Matter.Body.setVelocity(body, { x: 0, y: 0 })
+        Matter.Body.setAngularVelocity(body, 0)
+        console.log(`✅ Synced block ${state.syncId} to (${Math.round(state.x)}, ${Math.round(state.y)})`)
+      } else if (!body) {
+        console.log(`❌ Could not find or create block with syncId: ${state.syncId}`)
+      }
     })
-  }, [])
+  }, [gameConfig])
 
   // Collaborative multiplayer event handlers
   useEffect(() => {
@@ -522,11 +607,33 @@ function App() {
 
     // Handle turn changes from server
     const handleTurnChanged = (data) => {
+      console.log(`🔄 Turn changed: isYourTurn=${data.isYourTurn}, turnCount=${data.turnCount}, blockStates=${data.blockStates?.length || 0}`)
       setIsMyTurn(data.isYourTurn)
       setTurnCount(data.turnCount)
       
-      // Apply the block states from partner
-      if (data.blockStates) {
+      // Apply the block states from partner - this is the authoritative state
+      if (data.blockStates && data.blockStates.length > 0) {
+        console.log('📥 Received block states from partner:', data.blockStates)
+        
+        // First, synchronize all blocks from the received state
+        if (engineRef.current && gameConfig) {
+          const world = engineRef.current.world
+          const bodies = Composite.allBodies(world)
+          const receivedSyncIds = new Set(data.blockStates.map(s => s.syncId))
+          
+          // Remove any blocks that exist locally but not in the synced state
+          // (except start blocks which should exist on both sides)
+          bodies.forEach(b => {
+            if (!b.isStatic && b.syncId && !receivedSyncIds.has(b.syncId)) {
+              // Don't remove start blocks - they should be consistent
+              if (!b.syncId.startsWith('start_block_') && !b.syncId.startsWith('level_start_')) {
+                console.log(`🗑️ Removing orphan block: ${b.syncId}`)
+                Composite.remove(world, b)
+              }
+            }
+          })
+        }
+        
         applyBlockStates(data.blockStates)
       }
       
@@ -546,13 +653,13 @@ function App() {
     // Handle block spawned by partner
     const handleBlockSpawned = (data) => {
       if (data.spawnedBy !== playerNumber && engineRef.current && gameConfig) {
-        // Partner spawned a block, we need to add it locally
+        // Partner spawned a block, we need to add it locally with the same syncId
         const blockConfig = gameConfig.block_library[data.block.label]
         if (blockConfig) {
-          const body = createBlock(blockConfig, { x: data.block.x, y: data.block.y })
-          body.id = data.block.id // Use same ID for sync
+          const body = createBlock(blockConfig, { x: data.block.x, y: data.block.y }, data.block.syncId)
           Composite.add(engineRef.current.world, body)
-          blockBodiesRef.current.set(data.block.id, body)
+          blockBodiesRef.current.set(data.block.syncId, body)
+          console.log(`🧱 Partner spawned block with syncId: ${data.block.syncId}`)
         }
       }
       setSpawnedBlocks(data.totalBlocks)
@@ -563,7 +670,8 @@ function App() {
       if (!engineRef.current) return
       const world = engineRef.current.world
       const bodies = Composite.allBodies(world)
-      const body = bodies.find(b => b.id === data.blockId)
+      // Find block by syncId instead of Matter.js id
+      const body = bodies.find(b => b.syncId === data.syncId)
       if (body && !body.isStatic) {
         Matter.Body.setPosition(body, { x: data.x, y: data.y })
         if (data.angle !== undefined) {
@@ -579,27 +687,71 @@ function App() {
       }
     }
 
+    // Handle game result from server (multiplayer game end)
+    const handleGameResult = (data) => {
+      console.log('🏆 Handling game result:', data)
+      
+      // Calculate tower height from current blocks
+      let towerHeight = 0
+      let totalBlocks = 0
+      if (engineRef.current) {
+        const bodies = Composite.allBodies(engineRef.current.world)
+        const blocks = bodies.filter(b => !b.isStatic && b.label !== 'ground' && b.label !== 'wall')
+        totalBlocks = blocks.length
+        
+        // Find highest block
+        blocks.forEach(block => {
+          const blockTop = block.position.y - (block.bounds.max.y - block.bounds.min.y) / 2
+          const height = 400 - blockTop // Ground is at y=400
+          if (height > towerHeight) {
+            towerHeight = height
+          }
+        })
+      }
+
+      // Determine result status based on tower height
+      let status = 'completed'
+      if (towerHeight >= 300) status = 'won'
+      else if (towerHeight >= 200) status = 'great'
+      else if (towerHeight >= 100) status = 'good'
+      else status = 'completed'
+
+      // Set game result to show the result overlay
+      setGameResult({
+        status,
+        towerHeight: Math.round(towerHeight),
+        totalBlocks,
+        turnsPlayed: turnCount,
+        multiplayerResult: data, // Store the full multiplayer result
+      })
+
+      // Force session time to 0 to show result
+      setSessionTime(0)
+    }
+
     matchmaking.on('turn_changed', handleTurnChanged)
     matchmaking.on('block_spawned', handleBlockSpawned)
     matchmaking.on('block_position_update', handleBlockPositionUpdate)
     matchmaking.on('game_state_sync', handleGameStateSync)
+    matchmaking.on('game_result', handleGameResult)
 
     return () => {
       matchmaking.off('turn_changed', handleTurnChanged)
       matchmaking.off('block_spawned', handleBlockSpawned)
       matchmaking.off('block_position_update', handleBlockPositionUpdate)
       matchmaking.off('game_state_sync', handleGameStateSync)
+      matchmaking.off('game_result', handleGameResult)
     }
-  }, [currentView, multiplayerGame, playerNumber, gameConfig, applyBlockStates])
+  }, [currentView, multiplayerGame, playerNumber, gameConfig, applyBlockStates, turnCount])
 
   // Sync block positions while dragging in multiplayer
   useEffect(() => {
     if (!multiplayerGame || !draggedBody || !isMyTurn) return
 
     const syncInterval = setInterval(() => {
-      if (draggedBody) {
+      if (draggedBody && draggedBody.syncId) {
         matchmaking.syncBlockPosition(
-          draggedBody.id,
+          draggedBody.syncId,
           draggedBody.position.x,
           draggedBody.position.y,
           draggedBody.angle
@@ -667,17 +819,18 @@ function App() {
         const block = createBlock(blockConfig, position)
         Composite.add(engineRef.current.world, block)
         
-        // Track the block for syncing
-        blockBodiesRef.current.set(block.id, block)
+        // Track the block for syncing using syncId
+        blockBodiesRef.current.set(block.syncId, block)
         
         // In collaborative mode, notify partner and update count via server
         if (multiplayerGame) {
           matchmaking.spawnBlock({
-            id: block.id,
+            syncId: block.syncId,
             label: blockConfig.label,
             x: position.x,
             y: position.y
           })
+          console.log(`🧱 Spawned block with syncId: ${block.syncId}`)
         } else {
           setSpawnedBlocks(prev => prev + 1)
         }
@@ -740,7 +893,7 @@ function App() {
 
     if (!blocks) return
 
-    blocks.forEach(sb => {
+    blocks.forEach((sb, index) => {
       const blockConfig = gameConfig.block_library[sb.block_id]
       if (blockConfig) {
         // resolve percentage positions same as other code
@@ -754,7 +907,9 @@ function App() {
           return Number(v)
         }
         const pos = { x: resolve(sb.position.x, width), y: resolve(sb.position.y, height) }
-        const body = createBlock(blockConfig, pos)
+        // Use deterministic syncId for level start blocks
+        const levelSyncId = `level_start_${index}_${sb.block_id}`
+        const body = createBlock(blockConfig, pos, levelSyncId)
         Composite.add(world, body)
       }
     })
