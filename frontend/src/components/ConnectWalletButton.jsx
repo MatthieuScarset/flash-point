@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useState, useEffect } from 'react'
-import { useAccount, useConnect, useDisconnect, useEnsName, useEnsAvatar, useChainId } from 'wagmi'
+import { useAccount, useConnect, useDisconnect, useEnsName, useEnsAvatar, useChainId, usePublicClient } from 'wagmi'
+import { ensGameHistory } from '../services/ensGameHistory'
 
 // ENS app URLs per network
 const ENS_APP_URLS = {
@@ -13,6 +14,7 @@ function ConnectWalletButton() {
   const { address, isConnected } = useAccount()
   const { disconnect } = useDisconnect()
   const chainId = useChainId()
+  const publicClient = usePublicClient()
   
   // Fetch ENS name and avatar
   const { data: ensName, isLoading: ensNameLoading } = useEnsName({ 
@@ -25,9 +27,24 @@ function ConnectWalletButton() {
   })
 
   const [showDropdown, setShowDropdown] = useState(false)
+  const [gameHistory, setGameHistory] = useState([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
   
   const ensAppUrl = ENS_APP_URLS[chainId] || ENS_APP_URLS[11155111]
   const isTestnet = chainId !== 1
+
+  // Load game history when dropdown opens
+  useEffect(() => {
+    if (showDropdown && ensName && publicClient) {
+      setLoadingHistory(true)
+      // Initialize the service with the public client
+      ensGameHistory.initialize(publicClient, null)
+      ensGameHistory.getGameHistory(ensName)
+        .then(history => setGameHistory(history.slice(0, 3))) // Show last 3 games
+        .catch(err => console.error('Failed to load game history:', err))
+        .finally(() => setLoadingHistory(false))
+    }
+  }, [showDropdown, ensName, publicClient])
 
   // Format address for display
   const formatAddress = (addr) => {
@@ -187,6 +204,57 @@ function ConnectWalletButton() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
               </a>
+
+              {/* Game History Section */}
+              {ensName && (
+                <>
+                  <div className="my-2 border-t border-white/10"></div>
+                  <div className="px-3 py-2">
+                    <p className="text-xs text-[#6ea0d6] font-medium mb-2 flex items-center gap-2">
+                      <span>🎮</span> Recent Games
+                    </p>
+                    {loadingHistory ? (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-xs text-[#9fb0cc]">Loading...</span>
+                      </div>
+                    ) : gameHistory.length > 0 ? (
+                      <div className="space-y-1">
+                        {gameHistory.map((game, index) => (
+                          <div key={index} className="flex items-center justify-between py-1.5 px-2 bg-white/5 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm">
+                                {game.result === 'won' ? '🏆' : game.result === 'lost' ? '💀' : '🤝'}
+                              </span>
+                              <span className={`text-xs font-medium ${
+                                game.result === 'won' ? 'text-green-400' : 
+                                game.result === 'lost' ? 'text-red-400' : 'text-yellow-400'
+                              }`}>
+                                {game.result === 'won' ? 'Won' : game.result === 'lost' ? 'Lost' : 'Draw'}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-xs text-[#e6eef8]">
+                                {game.payout > 0 ? `+${game.payout}` : game.payout} GWEI
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                        <a
+                          href={`${ensAppUrl}/${ensName}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block text-center text-xs text-[#6ea0d6] hover:text-blue-400 pt-1"
+                        >
+                          View all on ENS →
+                        </a>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-[#9fb0cc] py-1">No games recorded yet</p>
+                    )}
+                  </div>
+                </>
+              )}
 
               {/* Divider */}
               <div className="my-2 border-t border-white/10"></div>
