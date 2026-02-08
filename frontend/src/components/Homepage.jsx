@@ -1,9 +1,52 @@
-import React from 'react'
-import { useAccount } from 'wagmi'
+import React, { useState, useEffect } from 'react'
+import { useAccount, usePublicClient, useWalletClient, useChainId } from 'wagmi'
 import ConnectWalletButton from './ConnectWalletButton'
+import { ensGameHistory } from '../services/ensGameHistory'
+
+// ENS app URLs per network
+const ENS_APP_URLS = {
+  1: 'https://app.ens.domains',           // Mainnet
+  11155111: 'https://sepolia.app.ens.domains', // Sepolia
+}
 
 function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
-  const { isConnected } = useAccount()
+  const { isConnected, address } = useAccount()
+  const chainId = useChainId()
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
+  
+  const [ensName, setEnsName] = useState(null)
+  const [gameHistory, setGameHistory] = useState([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  // Get ENS URL based on current network
+  const ensAppUrl = ENS_APP_URLS[chainId] || ENS_APP_URLS[11155111] // Default to Sepolia for testnets
+  const isTestnet = chainId !== 1
+
+  // Load ENS name and game history when connected
+  useEffect(() => {
+    if (publicClient && walletClient && address) {
+      ensGameHistory.initialize(publicClient, walletClient)
+      
+      // Get ENS name
+      ensGameHistory.getENSName(address).then(name => {
+        if (name) {
+          setEnsName(name)
+          console.log('📛 ENS name found:', name)
+          
+          // Load game history from ENS
+          setLoadingHistory(true)
+          ensGameHistory.getGameHistory(name).then(history => {
+            setGameHistory(history || [])
+            setLoadingHistory(false)
+          }).catch(() => setLoadingHistory(false))
+        }
+      })
+    } else {
+      setEnsName(null)
+      setGameHistory([])
+    }
+  }, [publicClient, walletClient, address])
   return (
     <div className="min-h-screen flex flex-col items-center px-6 py-12 bg-gradient-to-b from-[#0b0f14] to-[#131a24]">
       {/* Header with Wallet */}
@@ -110,6 +153,124 @@ function Homepage({ gameModes, onStartGame, onStartMultiplayer }) {
           </ul>
         </div>
       </div>
+
+      {/* ENS Profile & Game History Section */}
+      {isConnected && (
+        <div className="w-full max-w-4xl mb-12">
+          <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-[#e6eef8] flex items-center gap-2">
+                📛 Your Profile
+              </h3>
+              {ensName ? (
+                <a
+                  href={`${ensAppUrl}/${ensName}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                >
+                  {ensName}
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </a>
+              ) : (
+                <a
+                  href={ensAppUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-yellow-400 hover:text-yellow-300 flex items-center gap-1"
+                >
+                  Get your .eth name {isTestnet ? '(Sepolia)' : ''} →
+                </a>
+              )}
+            </div>
+
+            {ensName ? (
+              <>
+                {/* Game History */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-[#9fb0cc]">
+                      🎮 Game History (stored on-chain via ENS)
+                    </p>
+                    <a
+                      href={`${ensAppUrl}/${ensName}?tab=records`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-blue-400 hover:text-blue-300"
+                    >
+                      View on ENS →
+                    </a>
+                  </div>
+                  
+                  {loadingHistory ? (
+                    <div className="text-center py-4">
+                      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                      <p className="text-xs text-[#6ea0d6] mt-2">Loading history...</p>
+                    </div>
+                  ) : gameHistory.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {gameHistory.slice(0, 5).map((game, i) => (
+                        <div key={i} className="bg-black/20 rounded-lg p-3 flex justify-between items-center">
+                          <div>
+                            <p className="text-sm text-white">
+                              🏗️ {game.h || 0}px tower
+                              <span className="text-xs text-[#9fb0cc] ml-2">
+                                ({game.b || 0} blocks, {game.t || 0} turns)
+                              </span>
+                            </p>
+                            <p className="text-xs text-[#6ea0d6]">
+                              {game.ts ? new Date(game.ts * 1000).toLocaleDateString() : 'Unknown date'}
+                              {game.w && ` • Partner: ${game.w}...`}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-green-400">
+                              ${((parseInt(game.p) || 0) / 1_000_000).toFixed(2)}
+                            </p>
+                            <p className="text-xs text-[#9fb0cc]">{game.r || '✅'}</p>
+                          </div>
+                        </div>
+                      ))}
+                      {gameHistory.length > 5 && (
+                        <p className="text-xs text-center text-[#6ea0d6]">
+                          +{gameHistory.length - 5} more games
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 bg-black/20 rounded-lg">
+                      <p className="text-[#9fb0cc] text-sm">No games recorded yet</p>
+                      <p className="text-xs text-[#6ea0d6] mt-1">Play a collaborative game to start your history!</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="bg-black/20 rounded-lg p-4">
+                <p className="text-[#9fb0cc] text-sm mb-3">
+                  Get an ENS name to save your game history on-chain!
+                </p>
+                <a
+                  href={ensAppUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full block text-center py-2 px-3 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded-lg text-sm transition-colors"
+                >
+                  {isTestnet ? '🧪 Get .eth on Sepolia' : '🔗 Get .eth on Mainnet'}
+                </a>
+                <p className="text-xs text-[#6ea0d6] mt-3 text-center">
+                  {isTestnet 
+                    ? '💡 You\'re on Sepolia testnet - register a free test ENS name!'
+                    : '💡 Switch to Sepolia for free test names, or register on mainnet'
+                  }
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="mt-auto pt-6">

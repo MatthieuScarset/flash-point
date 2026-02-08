@@ -1130,12 +1130,13 @@ function App() {
                 {/* Yellow Network State Channel Settlement */}
                 {multiplayerGame && (
                   <>
-                    {console.log('🔍 Rendering GameSettlement with sessionId:', stateChannelSessionId)}
+                    {console.log('🔍 Rendering GameSettlement with sessionId:', stateChannelSessionId, 'playerNumber:', playerNumber)}
                     <GameSettlement
                       gameResult={gameResult}
                       sessionId={stateChannelSessionId}
                       player1Address={playerNumber === 1 ? multiplayerGame.player?.address : partnerAddress}
                       player2Address={playerNumber === 2 ? multiplayerGame.player?.address : partnerAddress}
+                      playerNumber={playerNumber}
                       onSettlementComplete={(result) => {
                         console.log('⚡ Settlement complete:', result)
                       }}

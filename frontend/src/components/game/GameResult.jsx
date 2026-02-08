@@ -11,12 +11,18 @@ function GameResult({
   onBackToHome,
   sessionId = null,
   opponentAddress = null,
-  betAmount = null 
+  betAmount = null,
+  playerNumber = 1, // Which player number (1 can settle, 2 waits)
 }) {
   const { address } = useAccount()
   const [isSettled, setIsSettled] = useState(false)
   
   if (!gameResult) return null
+
+  // For settlement, we need the actual player addresses in order
+  // Player 1 submitted the session, so they're the "settler"
+  const player1Addr = playerNumber === 1 ? address : opponentAddress
+  const player2Addr = playerNumber === 1 ? opponentAddress : address
 
   const handleSettlementComplete = (result) => {
     console.log('Settlement complete:', result)
@@ -59,8 +65,9 @@ function GameResult({
         <GameSettlement
           gameResult={gameResult}
           sessionId={sessionId}
-          player1Address={address}
-          player2Address={opponentAddress}
+          player1Address={player1Addr}
+          player2Address={player2Addr}
+          playerNumber={playerNumber}
           betAmount={betAmount}
           onSettlementComplete={handleSettlementComplete}
           onSkip={handleSkipSettlement}

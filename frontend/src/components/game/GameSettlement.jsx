@@ -1,5 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react'
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { nitroliteClient, DEFAULT_ENTRY_FEE, REWARD_TIERS, getRewardTier } from '../../services/nitroliteClient'
+import { ensGameHistory, createGameHistoryEntry } from '../../services/ensGameHistory'
 
 /**
  * Settlement states
@@ -14,19 +16,43 @@ const SettlementState = {
 /**
  * GameSettlement Component
  * Handles the on-chain settlement of game results via Yellow Network state channels
+ * 
+ * Only Player 1 (who submitted the session to ClearNode) can settle.
+ * Player 2 waits for settlement confirmation from Player 1.
  */
 function GameSettlement({ 
   gameResult, 
   sessionId, 
   player1Address, 
   player2Address,
+  playerNumber = 1, // 1 = can settle, 2 = waits for Player 1
   entryFee = DEFAULT_ENTRY_FEE,
   onSettlementComplete,
   onSkip
 }) {
+  const { address } = useAccount()
+  const publicClient = usePublicClient()
+  const { data: walletClient } = useWalletClient()
+  
   const [state, setState] = useState(SettlementState.PENDING)
   const [error, setError] = useState(null)
   const [settlementDetails, setSettlementDetails] = useState(null)
+  const [ensStatus, setEnsStatus] = useState(null) // 'saving' | 'saved' | 'error' | 'no-ens'
+  const [ensName, setEnsName] = useState(null)
+
+  // Initialize ENS service when wallet is available
+  useEffect(() => {
+    if (publicClient && walletClient) {
+      ensGameHistory.initialize(publicClient, walletClient)
+      // Try to get ENS name for current user
+      ensGameHistory.getENSName(address).then(name => {
+        if (name) {
+          setEnsName(name)
+          console.log('📛 ENS name found:', name)
+        }
+      })
+    }
+  }, [publicClient, walletClient, address])
 
   // Format USDC amount for display (6 decimals)
   const formatUSDC = (amount) => {
@@ -72,14 +98,60 @@ function GameSettlement({
 
   // Check if this is a demo session
   const isDemoSession = sessionId?.startsWith('demo_session_')
+  
+  // Player 2 cannot settle real sessions (only Player 1 has the appSessionId)
+  const canSettle = playerNumber === 1 || isDemoSession
+
+  // Save game to ENS history
+  const saveToENS = async (result) => {
+    if (!ensName) {
+      setEnsStatus('no-ens')
+      return
+    }
+
+    try {
+      setEnsStatus('saving')
+      
+      const historyEntry = createGameHistoryEntry({
+        sessionId,
+        towerHeight: payoutPreview?.towerHeight || gameResult?.towerHeight || 0,
+        blocksPlaced: gameResult?.totalBlocks || 0,
+        turns: gameResult?.turnsPlayed || 0,
+        rewardTier: payoutPreview?.rewardTier,
+        payout: playerNumber === 1 ? result.player1Payout : result.player2Payout,
+        partnerAddress: playerNumber === 1 ? player2Address : player1Address,
+        chainId: publicClient?.chain?.id || 11155111,
+      })
+
+      const ensResult = await ensGameHistory.saveGameToHistory(ensName, historyEntry)
+      
+      if (ensResult.success) {
+        setEnsStatus('saved')
+        console.log('✅ Game saved to ENS:', ensResult)
+      } else {
+        setEnsStatus('error')
+        console.warn('⚠️ Could not save to ENS:', ensResult.error)
+      }
+    } catch (err) {
+      console.error('Failed to save to ENS:', err)
+      setEnsStatus('error')
+    }
+  }
 
   // Handle settlement
   const handleSettle = useCallback(async () => {
-    console.log('🔘 Settle button clicked!', { sessionId, player1Address, player2Address, isDemoSession })
+    console.log('🔘 Settle button clicked!', { sessionId, player1Address, player2Address, isDemoSession, playerNumber, canSettle })
     
     if (!sessionId) {
       console.error('❌ No sessionId')
       setError('Missing session information')
+      return
+    }
+
+    // Player 2 cannot settle real sessions
+    if (!canSettle) {
+      setError('Only Player 1 can settle. Please wait for settlement confirmation.')
+      setState(SettlementState.ERROR)
       return
     }
 
@@ -121,6 +193,9 @@ function GameSettlement({
         setSettlementDetails(simulatedResult)
         setState(SettlementState.SUCCESS)
         
+        // Save to ENS (async, don't block)
+        saveToENS(simulatedResult)
+        
         if (onSettlementComplete) {
           onSettlementComplete(simulatedResult)
         }
@@ -128,6 +203,12 @@ function GameSettlement({
       }
 
       // Real mode: settle with shared tower height via Nitrolite
+      // First, ensure we have the session ID stored
+      if (!nitroliteClient.appSessionId && sessionId && !isDemoSession) {
+        console.log('📝 Setting appSessionId from prop:', sessionId)
+        nitroliteClient.appSessionId = sessionId
+      }
+      
       console.log('⚡ Real mode: Settling via Nitrolite...')
       const result = await nitroliteClient.settleGameSession({
         towerHeight: payoutPreview?.towerHeight || 0,
@@ -137,6 +218,9 @@ function GameSettlement({
 
       setSettlementDetails(result)
       setState(SettlementState.SUCCESS)
+      
+      // Save to ENS (async, don't block)
+      saveToENS(result)
       
       if (onSettlementComplete) {
         onSettlementComplete(result)
@@ -268,17 +352,42 @@ function GameSettlement({
             )}
           </div>
 
-          <button
-            onClick={handleSettle}
-            className="w-full py-3 px-6 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-black font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <span>⚡</span>
-            Settle On-Chain
-          </button>
+          {/* Settle Button - Only for Player 1 or Demo */}
+          {canSettle ? (
+            <>
+              <button
+                onClick={handleSettle}
+                className="w-full py-3 px-6 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 text-black font-bold rounded-lg transition-all duration-150 flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <span>⚡</span>
+                Settle On-Chain
+              </button>
 
-          <p className="text-xs text-[#9fb0cc] text-center mt-2">
-            Finalize balances through Nitrolite smart contracts
-          </p>
+              <p className="text-xs text-[#9fb0cc] text-center mt-2">
+                Finalize balances through Nitrolite smart contracts
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="w-full py-3 px-6 bg-gray-600/50 text-gray-300 font-bold rounded-lg flex items-center justify-center gap-2">
+                <span className="animate-pulse">⏳</span>
+                Waiting for Partner to Settle
+              </div>
+              
+              <p className="text-xs text-[#9fb0cc] text-center mt-2">
+                Your partner (Player 1) will settle the game
+              </p>
+              
+              {onSkip && (
+                <button
+                  onClick={onSkip}
+                  className="mt-3 w-full py-2 px-4 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-colors"
+                >
+                  Skip & Return to Menu
+                </button>
+              )}
+            </>
+          )}
         </>
       )}
 
@@ -303,10 +412,25 @@ function GameSettlement({
             Funds distributed via Yellow Network State Channel
           </p>
           
+          {/* Verification Link */}
+          {sessionId && !sessionId.startsWith('demo_') && (
+            <a
+              href={`https://clearnet-sandbox.yellow.com/explorer/session/${sessionId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-yellow-400 hover:text-yellow-300 underline mb-4"
+            >
+              🔗 View on Yellow Network Explorer
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+          )}
+          
           <div className="bg-black/20 rounded-lg p-3 text-left mb-3">
             <p className="text-xs text-[#9fb0cc] mb-1">Your Payout</p>
             <p className="text-2xl font-bold text-green-400">
-              ${formatUSDC(settlementDetails.player1Payout)} USDC
+              ${formatUSDC(playerNumber === 1 ? settlementDetails.player1Payout : settlementDetails.player2Payout)} USDC
             </p>
           </div>
           
@@ -320,6 +444,56 @@ function GameSettlement({
               {settlementDetails.demo && (
                 <p className="text-xs text-yellow-400 mt-1">⚠️ Demo transaction (not on-chain)</p>
               )}
+            </div>
+          )}
+
+          {/* ENS History Status */}
+          {ensName && (
+            <div className="bg-black/20 rounded-lg p-3 text-left mb-3">
+              <p className="text-xs text-[#9fb0cc] mb-1">Game History</p>
+              {ensStatus === 'saving' && (
+                <p className="text-xs text-yellow-400">📝 Saving to {ensName}...</p>
+              )}
+              {ensStatus === 'saved' && (
+                <div>
+                  <p className="text-xs text-green-400 mb-2">✅ Saved to {ensName}</p>
+                  <a
+                    href={`https://app.ens.domains/${ensName}?tab=records`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 underline"
+                  >
+                    📜 View Game History on ENS
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+              )}
+              {ensStatus === 'error' && (
+                <p className="text-xs text-red-400">⚠️ Could not save to ENS</p>
+              )}
+            </div>
+          )}
+          
+          {/* No ENS - suggest getting one */}
+          {!ensName && ensStatus !== 'saving' && (
+            <div className="bg-black/20 rounded-lg p-3 text-left mb-3">
+              <p className="text-xs text-[#9fb0cc] mb-1">Game History</p>
+              <p className="text-xs text-[#6ea0d6] mb-2">
+                Get an ENS name to save your game history on-chain!
+              </p>
+              <a
+                href="https://app.ens.domains"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 underline"
+              >
+                🔗 Get your .eth name
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
             </div>
           )}
 
