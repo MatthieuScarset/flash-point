@@ -412,19 +412,16 @@ function GameSettlement({
             Funds distributed via Yellow Network State Channel
           </p>
           
-          {/* Verification Link */}
+          {/* Session ID Display */}
           {sessionId && !sessionId.startsWith('demo_') && (
-            <a
-              href={`https://clearnet-sandbox.yellow.com/explorer/session/${sessionId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-yellow-400 hover:text-yellow-300 underline mb-4"
-            >
-              🔗 View on Yellow Network Explorer
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
+            <div className="bg-gradient-to-r from-yellow-500/10 to-orange-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+              <p className="text-xs text-yellow-400 mb-1 flex items-center justify-center gap-1">
+                <span>⚡</span> Yellow Network Session
+              </p>
+              <p className="text-xs font-mono text-[#e6eef8] break-all">
+                {sessionId}
+              </p>
+            </div>
           )}
           
           <div className="bg-black/20 rounded-lg p-3 text-left mb-3">
@@ -434,18 +431,19 @@ function GameSettlement({
             </p>
           </div>
           
-          {/* Transaction Details */}
-          {settlementDetails.txHash && (
-            <div className="bg-black/20 rounded-lg p-3 text-left mb-3">
-              <p className="text-xs text-[#9fb0cc] mb-1">Transaction</p>
-              <p className="text-xs font-mono text-[#6ea0d6] break-all">
-                {settlementDetails.txHash}
-              </p>
-              {settlementDetails.demo && (
-                <p className="text-xs text-yellow-400 mt-1">⚠️ Demo transaction (not on-chain)</p>
-              )}
-            </div>
-          )}
+          {/* Settlement Explanation */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 text-left mb-3">
+            <p className="text-xs text-blue-300 mb-1 flex items-center gap-1">
+              <span>ℹ️</span> State Channel Settlement
+            </p>
+            <p className="text-xs text-[#9fb0cc]">
+              Funds are settled off-chain via Yellow Network state channels. 
+              No gas fees! Your balance is updated instantly in the ClearNode.
+            </p>
+            {settlementDetails.demo && (
+              <p className="text-xs text-yellow-400 mt-2">⚠️ Demo mode - no real funds involved</p>
+            )}
+          </div>
 
           {/* ENS History Status */}
           {ensName && (
