@@ -472,22 +472,26 @@ function App() {
     const bodies = Composite.allBodies(world)
     const container = sceneRef.current
     const height = container.clientHeight || 600
-    const groundY = height - Math.max(20, Math.round(height * 0.06))
+    const groundH = Math.max(20, Math.round(height * 0.06))
+    const groundY = height - groundH  // TOP of ground, where blocks rest
     
     // Find the highest point (lowest Y value) among non-static bodies
     let highestY = groundY
+    let highestBlock = null
     bodies.forEach(b => {
-      if (!b.isStatic) {
+      if (!b.isStatic && b.syncId) {
         // Account for block size (bounds)
         const topY = b.bounds.min.y
         if (topY < highestY) {
           highestY = topY
+          highestBlock = b
         }
       }
     })
     
     // Height is distance from ground to highest point
     const towerHeight = Math.max(0, groundY - highestY)
+    console.log(`📏 Tower height calculation: containerHeight=${height}, groundY=${groundY}, highestY=${Math.round(highestY)}, towerHeight=${Math.round(towerHeight)}, highestBlock=${highestBlock?.syncId}`)
     return Math.round(towerHeight)
   }, [])
 
@@ -591,9 +595,11 @@ function App() {
         // Set position, angle, and velocity to match partner's state
         Matter.Body.setPosition(body, { x: state.x, y: state.y })
         Matter.Body.setAngle(body, state.angle)
-        // Set velocity to 0 to stop movement and let physics settle
+        // Set velocity to 0 to stop movement
         Matter.Body.setVelocity(body, { x: 0, y: 0 })
         Matter.Body.setAngularVelocity(body, 0)
+        // Put block to sleep to prevent physics from moving it
+        Matter.Sleeping.set(body, true)
         console.log(`✅ Synced block ${state.syncId} to (${Math.round(state.x)}, ${Math.round(state.y)})`)
       } else if (!body) {
         console.log(`❌ Could not find or create block with syncId: ${state.syncId}`)
@@ -691,23 +697,9 @@ function App() {
     const handleGameResult = (data) => {
       console.log('🏆 Handling game result:', data)
       
-      // Calculate tower height from current blocks
-      let towerHeight = 0
-      let totalBlocks = 0
-      if (engineRef.current) {
-        const bodies = Composite.allBodies(engineRef.current.world)
-        const blocks = bodies.filter(b => !b.isStatic && b.label !== 'ground' && b.label !== 'wall')
-        totalBlocks = blocks.length
-        
-        // Find highest block
-        blocks.forEach(block => {
-          const blockTop = block.position.y - (block.bounds.max.y - block.bounds.min.y) / 2
-          const height = 400 - blockTop // Ground is at y=400
-          if (height > towerHeight) {
-            towerHeight = height
-          }
-        })
-      }
+      // Use the same calculation as calculateTowerHeight for consistency
+      const towerHeight = calculateTowerHeight()
+      const totalBlocks = countTotalBlocks()
 
       // Determine result status based on tower height
       let status = 'completed'
@@ -768,18 +760,38 @@ function App() {
 
     const world = engineRef.current.world
     const mouseConstraint = mouseConstraintRef.current
+    const bodies = Composite.allBodies(world)
 
     if (isMyTurn) {
       // Enable dragging - add mouse constraint if not present
-      const bodies = Composite.allBodies(world)
       if (!bodies.includes(mouseConstraint)) {
         Composite.add(world, mouseConstraint)
+      }
+      
+      // Unfreeze all blocks when it's your turn (in multiplayer)
+      if (multiplayerGame) {
+        bodies.forEach(b => {
+          if (!b.isStatic && b.syncId) {
+            Matter.Sleeping.set(b, false)
+          }
+        })
       }
     } else {
       // Disable dragging - remove mouse constraint
       Composite.remove(world, mouseConstraint)
+      
+      // Freeze all blocks when it's partner's turn (in multiplayer)
+      // This prevents physics divergence between clients
+      if (multiplayerGame) {
+        bodies.forEach(b => {
+          if (!b.isStatic && b.syncId) {
+            // Set blocks to sleep so physics doesn't move them
+            Matter.Sleeping.set(b, true)
+          }
+        })
+      }
     }
-  }, [isMyTurn])
+  }, [isMyTurn, multiplayerGame])
 
   // 4. Update spawner logic
   const spawnBlock = () => {
